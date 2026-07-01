@@ -8,6 +8,6 @@ int main()
     World world;
 
     while (renderer.Update()){
-
+        world.Simulate(0.02f);
     }
 }

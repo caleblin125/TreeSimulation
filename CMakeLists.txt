@@ -24,12 +24,19 @@ target_include_directories(glad PUBLIC
 add_library(TreeSimCore
     src/simulation/world.cpp
     src/simulation/organism.cpp
+    src/simulation/limb.cpp
+)
+target_include_directories(TreeSimCore PUBLIC
+    src/simulation
 )
 
 add_library(TreeSimRenderer
     src/renderer/renderer.cpp
     src/renderer/shader.cpp
     src/renderer/camera.cpp
+)
+target_include_directories(TreeSimRenderer PUBLIC
+    src/renderer
 )
 
 if (TARGET glfw)
@@ -40,6 +47,7 @@ endif()
 target_link_libraries(TreeSimRenderer PUBLIC
     glad
     OpenGL::GL
+    TreeSimCore
 )
 
 # GLFW linking

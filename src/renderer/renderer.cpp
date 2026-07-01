@@ -4,16 +4,16 @@
 #include <filesystem>
 #include <iostream>
 
-namespace {
-    std::string ResolveShaderPath(const char* relativePath)
+namespace
+{
+    std::string ResolveShaderPath(const char *relativePath)
     {
         const std::filesystem::path candidates[] = {
             std::filesystem::path(relativePath),
             std::filesystem::path("..").append(relativePath),
-            std::filesystem::path("src").append(relativePath)
-        };
+            std::filesystem::path("src").append(relativePath)};
 
-        for (const auto& candidate : candidates)
+        for (const auto &candidate : candidates)
         {
             if (std::filesystem::exists(candidate))
                 return candidate.string();
@@ -21,6 +21,11 @@ namespace {
 
         return relativePath;
     }
+}
+
+void framebuffer_size_callback(GLFWwindow *window, int width, int height)
+{
+    glViewport(0, 0, width, height);
 }
 
 Renderer::Renderer()
@@ -44,6 +49,7 @@ Renderer::Renderer()
     }
 
     glfwMakeContextCurrent(window);
+    glfwSwapInterval(1);
 
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
     {
@@ -53,6 +59,8 @@ Renderer::Renderer()
         glfwTerminate();
         return;
     }
+
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
 
     glViewport(0, 0, 800, 600);
 
@@ -72,13 +80,12 @@ Renderer::Renderer()
 
     float planeVertices[] = {
         -0.5f, -0.5f, 0.0f,
-         0.5f, -0.5f, 0.0f,
-         0.5f,  0.5f, 0.0f,
+        0.5f, -0.5f, 0.0f,
+        0.5f, 0.5f, 0.0f,
 
         -0.5f, -0.5f, 0.0f,
-         0.5f,  0.5f, 0.0f,
-        -0.5f,  0.5f, 0.0f
-    };
+        0.5f, 0.5f, 0.0f,
+        -0.5f, 0.5f, 0.0f};
 
     glGenVertexArrays(1, &planeVAO);
     glGenBuffers(1, &planeVBO);
@@ -87,11 +94,71 @@ Renderer::Renderer()
     glBindBuffer(GL_ARRAY_BUFFER, planeVBO);
     glBufferData(GL_ARRAY_BUFFER, sizeof(planeVertices), planeVertices, GL_STATIC_DRAW);
 
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
     glEnableVertexAttribArray(0);
     glBindVertexArray(0);
 
     alive = true;
+    lastFrameTime = glfwGetTime();
+}
+
+void Renderer::ProcessKeyboardInput(float deltaTime)
+{
+    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+        glfwSetWindowShouldClose(window, true);
+
+    const glm::vec3 forward = glm::normalize(camera.GetFront());
+    const glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3(0.0f, 1.0f, 0.0f)));
+    const glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
+
+    glm::vec3 movement(0.0f);
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+        movement += forward;
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+        movement -= forward;
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+        movement -= right;
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+        movement += right;
+    if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
+        movement -= up;
+    if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)
+        movement += up;
+
+    if (glm::length(movement) > 0.0f)
+        camera.Move(glm::normalize(movement) * moveSpeed * deltaTime);
+}
+
+void Renderer::ProcessMouseInput()
+{
+    double mouseX, mouseY;
+    glfwGetCursorPos(window, &mouseX, &mouseY);
+    bool isDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+
+    if (isDown)
+    {
+        if (!leftMouseDown)
+        {
+            leftMouseDown = true;
+            lastMouseX = mouseX;
+            lastMouseY = mouseY;
+            return;
+        }
+
+        float xoffset = static_cast<float>(mouseX - lastMouseX);
+        float yoffset = static_cast<float>(lastMouseY - mouseY);
+        lastMouseX = mouseX;
+        lastMouseY = mouseY;
+
+        xoffset *= mouseSensitivity;
+        yoffset *= mouseSensitivity;
+
+        camera.Rotate(xoffset, yoffset);
+    }
+    else
+    {
+        leftMouseDown = false;
+    }
 }
 
 Renderer::~Renderer()
@@ -107,16 +174,35 @@ Renderer::~Renderer()
         window = nullptr;
     }
 
+    shader = Shader();
     glfwTerminate();
+}
+
+void Renderer::DrawLimb(Limb* limb){
+    if(!limb){
+        return;
+    }
+
+    
 }
 
 bool Renderer::Update()
 {
-    if (!window || glfwWindowShouldClose(window) || !alive)
+    if (!window || !alive)
+        return false;
+
+    glfwPollEvents();
+    if (glfwWindowShouldClose(window))
     {
         alive = false;
         return false;
     }
+
+    const float currentTime = static_cast<float>(glfwGetTime());
+    const float deltaTime = static_cast<float>(currentTime - lastFrameTime);
+    lastFrameTime = currentTime;
+    ProcessKeyboardInput(deltaTime);
+    ProcessMouseInput();
 
     glClearColor(0.2f, 0.3f, 0.4f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -136,6 +222,5 @@ bool Renderer::Update()
     glBindVertexArray(0);
 
     glfwSwapBuffers(window);
-    glfwPollEvents();
     return true;
 }
