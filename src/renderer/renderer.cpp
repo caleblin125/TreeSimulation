@@ -1,5 +1,6 @@
 #include "renderer.hpp"
 
+#include <math.h>
 #include <glm/gtc/type_ptr.hpp>
 #include <filesystem>
 #include <iostream>
@@ -26,6 +27,41 @@ namespace
 void framebuffer_size_callback(GLFWwindow *window, int width, int height)
 {
     glViewport(0, 0, width, height);
+}
+
+unsigned int MakeLimb(unsigned int N, unsigned int EBO, unsigned int VBO)
+{
+    // center, radial(N), end -> cone
+    float limbVertices[3 * (N + 2)];
+    memset(limbVertices, 0, sizeof(limbVertices));
+    for (unsigned int i = 0; i < N; i++)
+    {
+        limbVertices[3 + 3 * i] = cos(M_PI * 2.0f * (float)i / (float)N);     // x
+        limbVertices[3 + 3 * i + 2] = sin(M_PI * 2.0f * (float)i / (float)N); // z
+    }
+    limbVertices[3 + 3 * N + 1] = 1.0f;
+
+    // radial triangles (N), cone triangles (N)
+    unsigned int limbIndexes[3 * (N + N)];
+    memset(limbIndexes, 0, sizeof(limbIndexes));
+    for (unsigned int i = 0; i < N; i++)
+    {
+        limbIndexes[3 * i + 1] = i + 1;
+        limbIndexes[3 * i + 2] = (i + 1) % N + 1;
+    }
+
+    for (unsigned int i = 0; i < N; i++)
+    {
+        limbIndexes[3 * N + 3 * i] = i + 1;
+        limbIndexes[3 * N + 3 * i + 1] = (i + 1) % N + 1;
+        limbIndexes[3 * N + 3 * i + 2] = 1 + N;
+    }
+
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(limbVertices), limbVertices, GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(limbIndexes), limbIndexes, GL_STATIC_DRAW);
+    return sizeof(limbVertices);
 }
 
 Renderer::Renderer()
@@ -78,23 +114,14 @@ Renderer::Renderer()
     camera.SetPosition(glm::vec3(0.0f, 1.5f, 3.0f));
     camera.SetTarget(glm::vec3(0.0f, 0.0f, 0.0f));
 
-    float planeVertices[] = {
-        -0.5f, -0.5f, 0.0f,
-        0.5f, -0.5f, 0.0f,
-        0.5f, 0.5f, 0.0f,
+    glGenVertexArrays(1, &limbVAO);
+    glGenBuffers(1, &limbVBO);
+    glGenBuffers(1, &limbEBO);
 
-        -0.5f, -0.5f, 0.0f,
-        0.5f, 0.5f, 0.0f,
-        -0.5f, 0.5f, 0.0f};
-
-    glGenVertexArrays(1, &planeVAO);
-    glGenBuffers(1, &planeVBO);
-
-    glBindVertexArray(planeVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, planeVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(planeVertices), planeVertices, GL_STATIC_DRAW);
-
+    glBindVertexArray(limbVAO);
+    limbvert = MakeLimb(20, limbEBO, limbVBO);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
+
     glEnableVertexAttribArray(0);
     glBindVertexArray(0);
 
@@ -163,10 +190,12 @@ void Renderer::ProcessMouseInput()
 
 Renderer::~Renderer()
 {
-    if (planeVAO)
-        glDeleteVertexArrays(1, &planeVAO);
-    if (planeVBO)
-        glDeleteBuffers(1, &planeVBO);
+    if (limbVAO)
+        glDeleteVertexArrays(1, &limbVAO);
+    if (limbVBO)
+        glDeleteBuffers(1, &limbVBO);
+    if (limbEBO)
+        glDeleteBuffers(1, &limbEBO);
 
     if (window)
     {
@@ -178,12 +207,9 @@ Renderer::~Renderer()
     glfwTerminate();
 }
 
-void Renderer::DrawLimb(Limb* limb){
-    if(!limb){
-        return;
-    }
-
-    
+void Renderer::DrawLimb(std::weak_ptr<Limb> limb)
+{
+    limbList.push_back(limb);
 }
 
 bool Renderer::Update()
@@ -210,15 +236,31 @@ bool Renderer::Update()
     glEnable(GL_DEPTH_TEST);
 
     shader.Use();
-    glm::mat4 model = glm::mat4(1.0f);
     glm::mat4 view = camera.ViewMatrix();
     glm::mat4 projection = camera.ProjectionMatrix();
-    shader.SetMat4("uModel", glm::value_ptr(model));
+
+    
     shader.SetMat4("uView", glm::value_ptr(view));
     shader.SetMat4("uProjection", glm::value_ptr(projection));
 
-    glBindVertexArray(planeVAO);
-    glDrawArrays(GL_TRIANGLES, 0, 6);
+    glBindVertexArray(limbVAO);
+    for(auto& limb : limbList){
+        if(limb.expired()){
+            continue;
+        }
+        std::shared_ptr<Limb> limb_ptr = limb.lock();
+        Limb::LimbData data = limb_ptr->GetData();
+        limb_ptr.reset();
+
+        glm::mat4 model = glm::mat4(1.0f);
+        model = glm::translate(model, data.root);
+        model *= glm::mat4_cast(data.orientation);
+        model = glm::scale(model, {data.radius, data.length, data.radius});
+        
+        shader.SetMat4("uModel", glm::value_ptr(model));
+        glDrawElements(GL_TRIANGLES, limbvert, GL_UNSIGNED_INT, nullptr);
+    }
+    limbList.clear();
     glBindVertexArray(0);
 
     glfwSwapBuffers(window);

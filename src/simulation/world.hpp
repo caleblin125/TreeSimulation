@@ -10,7 +10,6 @@
 
 #include "organism.hpp"
 
-
 class World
 {
 public:
@@ -18,6 +17,8 @@ public:
 
     void MakeOrganism(glm::vec3 root, glm::quat orientation);
     void Simulate(float dt);
+
+    std::vector<std::weak_ptr<Limb>> GetLimbs();
 
 private:
     unsigned int ids = 0;

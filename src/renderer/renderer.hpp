@@ -1,5 +1,8 @@
 #pragma once
 
+#include <memory>
+#include <vector>
+
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 
@@ -14,7 +17,7 @@ public:
     Renderer();
     ~Renderer();
     bool Update();
-    void DrawLimb(Limb* limb);
+    void DrawLimb(std::weak_ptr<Limb> limb);
 
 private:
     void ProcessKeyboardInput(float deltaTime);
@@ -22,8 +25,13 @@ private:
 
     bool alive = false;
     GLFWwindow* window = nullptr;
-    unsigned int planeVAO = 0;
-    unsigned int planeVBO = 0;
+
+    unsigned int limbvert;
+    unsigned int limbVAO = 0;
+    unsigned int limbVBO = 0;
+    unsigned int limbEBO = 0;
+    std::vector<std::weak_ptr<Limb>> limbList;
+
     Shader shader;
     Camera camera;
     float moveSpeed = 2.5f;
