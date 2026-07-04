@@ -26,7 +26,7 @@ Limb::Limb(std::weak_ptr<Limb> parent, float attachment, glm::quat rotation):
         return;
     }
     std::shared_ptr<Limb> parent_ptr = parent.lock();
-    root = parent_ptr->root + parent_ptr->orientation*glm::vec3(parent_ptr->length * attachment, 0.0f, 0.0f);
+    root = parent_ptr->root + parent_ptr->orientation*glm::vec3(0.0f, parent_ptr->length * attachment, 0.0f);
     orientation = parent_ptr->orientation * rotation;
 
     end = root + orientation * glm::vec3(0.0f, length, 0.0f);
@@ -36,7 +36,7 @@ void Limb::Simulate(float dt){
     
     if(!parent.expired()){
         auto p = parent.lock();
-        root = p->root + p->orientation*glm::vec3(p->length * attachment, 0.0f, 0.0f);
+        root = p->root + p->orientation*glm::vec3(0.0f, p->length * attachment, 0.0f);
         orientation = p->orientation * rotation;
     }
 
@@ -45,7 +45,7 @@ void Limb::Simulate(float dt){
 
     if((length > 4.0f) && (children.size() == 0)){
         glm::quat qYaw =
-            glm::angleAxis(glm::radians(60.0f),
+            glm::angleAxis(glm::radians(120.0f),
                         glm::vec3(0.0f, 1.0f, 0.0f));
 
         glm::quat qPitch =

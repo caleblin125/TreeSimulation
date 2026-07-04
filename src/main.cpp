@@ -7,7 +7,7 @@ int main()
     Renderer renderer;
     World world;
 
-    world.MakeOrganism({1,0,0}, {});
+    world.MakeOrganism({1,0,0}, glm::identity<glm::quat>());
     while (renderer.Update()){
         world.Simulate(0.02f);
 

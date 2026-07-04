@@ -256,6 +256,13 @@ bool Renderer::Update()
         model = glm::translate(model, data.root);
         model *= glm::mat4_cast(data.orientation);
         model = glm::scale(model, {data.radius, data.length, data.radius});
+
+        // glm::vec3 dir = data.orientation * glm::vec3(1,0,0);
+
+        //     std::cout
+        //         << dir.x << " "
+        //         << dir.y << " "
+        //         << dir.z << std::endl;
         
         shader.SetMat4("uModel", glm::value_ptr(model));
         glDrawElements(GL_TRIANGLES, limbvert, GL_UNSIGNED_INT, nullptr);
