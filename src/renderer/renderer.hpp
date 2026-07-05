@@ -32,6 +32,9 @@ private:
     unsigned int limbEBO = 0;
     std::vector<std::weak_ptr<Limb>> limbList;
 
+    unsigned int floorVAO = 0;
+    unsigned int floorVBO = 0;
+
     Shader shader;
     Camera camera;
     float moveSpeed = 2.5f;

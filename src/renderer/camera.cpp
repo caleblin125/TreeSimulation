@@ -1,6 +1,7 @@
 #include "camera.hpp"
 
 #include <glm/gtc/constants.hpp>
+#include <iostream>
 
 Camera::Camera()
 {
@@ -30,6 +31,9 @@ void Camera::SetPerspective(float fovYDegrees, float aspectRatio, float nearPlan
 
 glm::mat4 Camera::ViewMatrix() const
 {
+    // printf("%.4f %.4f %.4f\n", position.x, position.y, position.z);
+    // printf("%.4f\n", yaw);
+    // printf("%.4f\n", pitch);
     return glm::lookAt(position, position + front, up);
 }
 

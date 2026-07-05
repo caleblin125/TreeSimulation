@@ -110,9 +110,9 @@ Renderer::Renderer()
         return;
     }
 
-    camera.SetPerspective(45.0f, 800.0f / 600.0f, 0.1f, 100.0f);
-    camera.SetPosition(glm::vec3(0.0f, 1.5f, 3.0f));
-    camera.SetTarget(glm::vec3(0.0f, 0.0f, 0.0f));
+    camera.SetPerspective(45.0f, 800.0f / 600.0f, 0.1f, 200.0f);
+    // camera.SetPosition(glm::vec3(0.0f, 1.5f, 3.0f));
+    // camera.SetTarget(glm::vec3(0.0f, 0.0f, 0.0f));
 
     glGenVertexArrays(1, &limbVAO);
     glGenBuffers(1, &limbVBO);
@@ -120,6 +120,26 @@ Renderer::Renderer()
 
     glBindVertexArray(limbVAO);
     limbvert = MakeLimb(20, limbEBO, limbVBO);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
+
+    glEnableVertexAttribArray(0);
+    glBindVertexArray(0);
+
+    float planeSide = 100.0f;
+    float floorVertices[]={
+        planeSide, 0.0f, planeSide,
+        -planeSide, 0.0f, planeSide,
+        -planeSide, 0.0f, -planeSide,
+        -planeSide, 0.0f, -planeSide,
+        planeSide, 0.0f, planeSide,
+        planeSide, 0.0f, -planeSide,
+    };
+
+    glGenVertexArrays(1, &floorVAO);
+    glGenBuffers(1, &floorVBO);
+    glBindVertexArray(floorVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, floorVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(floorVertices), floorVertices, GL_STATIC_DRAW);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
 
     glEnableVertexAttribArray(0);
@@ -243,6 +263,11 @@ bool Renderer::Update()
     shader.SetMat4("uView", glm::value_ptr(view));
     shader.SetMat4("uProjection", glm::value_ptr(projection));
 
+    glBindVertexArray(floorVAO);
+    glm::mat4 model = glm::mat4(1.0f);
+    shader.SetMat4("uModel", glm::value_ptr(model));
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+
     glBindVertexArray(limbVAO);
     for(auto& limb : limbList){
         if(limb.expired()){
@@ -252,7 +277,7 @@ bool Renderer::Update()
         Limb::LimbData data = limb_ptr->GetData();
         limb_ptr.reset();
 
-        glm::mat4 model = glm::mat4(1.0f);
+        model = glm::mat4(1.0f);
         model = glm::translate(model, data.root);
         model *= glm::mat4_cast(data.orientation);
         model = glm::scale(model, {data.radius, data.length, data.radius});
