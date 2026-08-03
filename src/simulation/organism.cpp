@@ -90,14 +90,19 @@ bool Organism::Simulate(float dtYears)
         lastStats.nutrientTransportEnergy += transportEnergy;
     }
 
+    const double maintenanceSeconds = dtYears * SimulationConstants::SecondsPerYear;
     for (const auto& limb : limbs)
     {
-        const double branchSurfaceArea = limb->SurfaceArea();
-        const double respiredCo2 = SimulationConstants::WoodyRespirationMolCo2PerM2Second * branchSurfaceArea * activeSeconds;
+        const double limbVolume = Geometry::CylinderVolume(limb->GetRadius(), limb->GetLength());
+        const double respiredCo2 = SimulationConstants::WoodyMaintenanceRespirationMolCo2PerM3Second * limbVolume * maintenanceSeconds;
         const double respirationEnergy = respiredCo2 * SimulationConstants::EnergyJPerMolCo2Fixed;
         energy -= respirationEnergy;
         lastStats.respirationEnergy += respirationEnergy;
     }
+
+    const double reserveDecayEnergy = std::max(0.0, energy) * SimulationConstants::EnergyReserveTurnoverFractionPerYear * dtYears;
+    energy -= reserveDecayEnergy;
+    lastStats.reserveDecayEnergy = reserveDecayEnergy;
 
     std::sort(limbDecisions.begin(), limbDecisions.end(), [](const LimbDecision& a, const LimbDecision& b)
     {

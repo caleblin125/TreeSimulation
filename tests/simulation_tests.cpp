@@ -208,6 +208,30 @@ void TestNutrientTransportCostScalesWithPathLength()
     Expect(tallOrganism.GetLastStats().nutrientTransportEnergy > shortOrganism.GetLastStats().nutrientTransportEnergy, "longer nutrient paths cost more energy");
 }
 
+void TestMaintenanceAndReserveCosts()
+{
+    Organism::Genome shortGenome;
+    shortGenome.seedInitialEnergy = 1'000'000.0;
+    shortGenome.branchSpawnEnergy = 1.0e12;
+
+    Organism::Genome bulkyGenome = shortGenome;
+    bulkyGenome.initialShootLength = 2.0f;
+    bulkyGenome.initialRootLength = 1.0f;
+    bulkyGenome.initialRadius = 0.08f;
+    bulkyGenome.woodDensity = 100.0;
+    bulkyGenome.bendingStrength = 1.0e12;
+
+    Organism shortOrganism(12, glm::vec3(0.0f), glm::identity<glm::quat>(), shortGenome);
+    Organism bulkyOrganism(13, glm::vec3(0.0f), glm::identity<glm::quat>(), bulkyGenome);
+
+    shortOrganism.Simulate(SimulationConstants::MaxStableStepYears);
+    bulkyOrganism.Simulate(SimulationConstants::MaxStableStepYears);
+
+    Expect(shortOrganism.GetLastStats().respirationEnergy > 0.0, "woody maintenance respiration is charged");
+    Expect(bulkyOrganism.GetLastStats().respirationEnergy > shortOrganism.GetLastStats().respirationEnergy, "larger woody volume costs more maintenance respiration");
+    Expect(shortOrganism.GetLastStats().reserveDecayEnergy > 0.0, "stored energy reserve decays each step");
+}
+
 void TestDefaultProtoTreeSurvivesAsSimpleForm()
 {
     Organism organism(7, glm::vec3(0.0f), glm::identity<glm::quat>());
@@ -359,6 +383,7 @@ int main()
     TestInitialRootAndBounds();
     TestMonthlyGrowth();
     TestNutrientTransportCostScalesWithPathLength();
+    TestMaintenanceAndReserveCosts();
     TestDefaultProtoTreeSurvivesAsSimpleForm();
     TestDefaultProtoTreeSurvivesStableSubsteps();
     TestLimbBrainControlsSplitAndReproduction();

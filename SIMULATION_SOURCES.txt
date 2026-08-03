@@ -71,18 +71,51 @@ This is a deliberate placeholder until explicit leaves are modeled.
 
 Woody respiration / maintenance
 -------------------------------
-Value used: WoodyRespirationMolCo2PerM2Second = 0.8 umol CO2/m^2/s.
+Value used: WoodyMaintenanceRespirationMolCo2PerM3Second = 6.5 umol
+CO2/m^3/s.
 
-Source: Asao, Bedoya-Arrieta, and Ryan, "Variation in foliar respiration and
-wood CO2 efflux rates among species and canopy layers in a wet tropical forest",
-US Forest Service / Tree Physiology.
-https://research.fs.usda.gov/treesearch/48611
+Sources:
+Ryan, Linder, Vose, and Hubbard, "Dark respiration of pines", Ecological
+Bulletins / Oregon State PDF mirror.
+https://people.forestry.oregonstate.edu/richard-waring/sites/richard-waring/files/publications/69.pdf
 
-Reasoning: The summary reports wood CO2 efflux around 0.6-0.9 umol/m^2/s for
-understory species and 1.0-1.6 umol/m^2/s for overstory trees. The sim uses the
-low end, 0.8 umol/m^2/s, because simulated trees are young and small. Respired
-CO2 is converted back to chemical energy cost with the same glucose-energy
-conversion used for photosynthesis.
+Ryan et al., "Woody tissue maintenance respiration of four conifers in
+contrasting climates", Oecologia / PubMed.
+https://pubmed.ncbi.nlm.nih.gov/28306783/
+
+Reasoning: The conifer study reports stem maintenance respiration linearly
+related to sapwood volume, with sapwood-volume rates around 4.8-8.3 umol
+CO2/m^3/s at 10 C and Q10 around 1.7. It also estimates aboveground woody
+maintenance as about 5-13% of net daytime carbon assimilation annually. The sim
+uses the middle of the reported sapwood-volume range, 6.5 umol CO2/m^3/s, and
+applies it to the simplified whole-cylinder limb volume. This is more fitting
+than the older surface-efflux placeholder because current limbs are wood
+cylinders without bark/sapwood layering.
+
+Energy reserve decay
+--------------------
+Value used: EnergyReserveTurnoverFractionPerYear = 0.08.
+
+Sources:
+Dietze et al., "Nonstructural Carbon in Woody Plants", Annual Review of Plant
+Biology.
+https://people.bu.edu/dietze/manuscripts/annurev-arplant-050213-040054.pdf
+
+Richardson et al., "Seasonal dynamics and age of stemwood nonstructural
+carbohydrates in temperate forest trees", New Phytologist / USDA Forest Service.
+https://digitalcommons.unl.edu/context/usdafsfacpub/article/1229/viewcontent/Richardson_NP_2012_Seasonal_dynamics_and_age_of_stemwood.pdf
+
+Martinez-Vilalta et al., "Dynamics of non-structural carbohydrates in terrestrial
+plants", Functional Ecology / PMC.
+https://pmc.ncbi.nlm.nih.gov/articles/PMC6288742/
+
+Reasoning: Nonstructural carbohydrates support growth, metabolism, defense,
+recovery, and seasonal stress. The literature separates faster-turnover
+accumulated carbon from slower stored pools, and stemwood NSC is observed to
+decline during winter and spring when it supports maintenance and growth. The
+sim keeps one organism-wide energy store, so it uses a conservative 8% annual
+turnover/decay on positive stored energy to prevent founders from banking energy
+forever without adding a full seasonal carbohydrate-pool model.
 
 Energy model
 ------------

@@ -237,6 +237,7 @@ void World::AccumulateStats(Organism::Stats& totals, const Organism::Stats& stat
     totals.energyEnd += stats.energyEnd;
     totals.photosynthesisEnergy += stats.photosynthesisEnergy;
     totals.respirationEnergy += stats.respirationEnergy;
+    totals.reserveDecayEnergy += stats.reserveDecayEnergy;
     totals.nutrientTransportEnergy += stats.nutrientTransportEnergy;
     totals.shootGrowthCost += stats.shootGrowthCost;
     totals.rootGrowthCost += stats.rootGrowthCost;
@@ -281,6 +282,7 @@ void World::PrintProfilingSummary(
         << " photoJ=" << totals.photosynthesisEnergy
         << " nutrientTransportJ=" << totals.nutrientTransportEnergy
         << " respJ=" << totals.respirationEnergy
+        << " reserveDecayJ=" << totals.reserveDecayEnergy
         << " shootGrowJ=" << totals.shootGrowthCost
         << " rootGrowJ=" << totals.rootGrowthCost
         << " shootGrowM=" << totals.shootGrowthLength

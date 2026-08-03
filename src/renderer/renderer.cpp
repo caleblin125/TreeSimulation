@@ -483,10 +483,11 @@ void Renderer::DrawNeuralNetworkWindow()
         ImGui::Text("age %.2f years   energy %.1f J", sample.ageYears, sample.energy);
         ImGui::Text("limbs %u   height %.2f m   resource %.2f", sample.stats.limbCount, sample.stats.maxHeight, sample.stats.resourceFactor);
         ImGui::Text("reproduce %.2f   split signals %u", sample.stats.reproductionPressure, sample.stats.splitSignals);
-        ImGui::Text("photo %.1f J   transport %.1f J   respiration %.1f J",
+        ImGui::Text("photo %.1f J   transport %.1f J   respiration %.1f J   reserve %.1f J",
             sample.stats.photosynthesisEnergy,
             sample.stats.nutrientTransportEnergy,
-            sample.stats.respirationEnergy);
+            sample.stats.respirationEnergy,
+            sample.stats.reserveDecayEnergy);
 
         if (ImGui::BeginTable(("weights##" + std::to_string(sample.id)).c_str(), static_cast<int>(Organism::GrowthBrainInputCount + 2), ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
         {
