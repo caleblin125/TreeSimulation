@@ -41,6 +41,27 @@ class Organism{
             unsigned int seedsPerReproduction = SimulationConstants::SeedsPerReproduction;
         };
 
+        struct Stats
+        {
+            unsigned int id = 0;
+            unsigned int limbCount = 0;
+            double energyStart = 0.0;
+            double energyEnd = 0.0;
+            double photosynthesisEnergy = 0.0;
+            double respirationEnergy = 0.0;
+            double shootGrowthCost = 0.0;
+            double rootGrowthCost = 0.0;
+            double fractureEnergyLoss = 0.0;
+            double resourceFactor = 0.0;
+            double leafArea = 0.0;
+            double rootSurfaceArea = 0.0;
+            float shootGrowthLength = 0.0f;
+            float rootGrowthLength = 0.0f;
+            float maxHeight = 0.0f;
+            bool diedFromCoreFracture = false;
+            bool alive = true;
+        };
+
         Organism(unsigned int id, glm::vec3 root, glm::quat orientation);
         Organism(unsigned int id, glm::vec3 root, glm::quat orientation, Genome genome);
         bool Simulate(float dt);
@@ -53,6 +74,7 @@ class Organism{
         glm::vec3 GetSeedOrigin();
         bool TryReproduce(double energyCost);
         const Genome& GetGenome() const;
+        const Stats& GetLastStats() const;
         Genome MakeMutatedGenome(std::mt19937& randomGenerator) const;
 
     private:
@@ -73,6 +95,7 @@ class Organism{
 
         unsigned int id;
         Genome genome;
+        Stats lastStats;
         std::shared_ptr<Limb> core;
         std::shared_ptr<Limb> rootSystem;
 

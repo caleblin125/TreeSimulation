@@ -53,4 +53,8 @@ namespace SimulationConstants
     constexpr double GenomeMutationStdDev = 0.08;
     constexpr double GenomeMinMultiplier = 0.25;
     constexpr double GenomeMaxMultiplier = 4.0;
+
+    // Profiling/debug output.
+    constexpr bool EnableSimulationProfiling = true;
+    constexpr float ProfilingPrintIntervalSeconds = 1.0f;
 }

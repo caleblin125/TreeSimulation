@@ -59,9 +59,15 @@ Organism::Organism(unsigned int id, glm::vec3 root, glm::quat orientation, Genom
 
 bool Organism::Simulate(float dt)
 {
+    lastStats = {};
+    lastStats.id = id;
+    lastStats.energyStart = energy;
+
     if (!core || !rootSystem)
     {
         alive = false;
+        lastStats.alive = false;
+        lastStats.energyEnd = energy;
         return alive;
     }
 
@@ -71,6 +77,7 @@ bool Organism::Simulate(float dt)
     UpdateBranchWeights(rootSystem);
     std::vector<std::shared_ptr<Limb>> limbs = CollectLimbs();
     std::vector<LimbLight> limbLight = CalculateSunlight(limbs);
+    lastStats.limbCount = static_cast<unsigned int>(limbs.size());
 
     double rootSurfaceArea = 0.0;
     double leafArea = 0.0;
@@ -81,11 +88,16 @@ bool Organism::Simulate(float dt)
             rootSurfaceArea += area;
         else
             leafArea += area * genome.leafAreaMultiplier;
+
+        lastStats.maxHeight = std::max(lastStats.maxHeight, limb->end.y);
     }
 
     const double resourceFactor = leafArea <= 0.0
         ? 1.0
         : std::clamp(rootSurfaceArea * genome.rootSupportedLeafArea / leafArea, 0.0, 1.0);
+    lastStats.rootSurfaceArea = rootSurfaceArea;
+    lastStats.leafArea = leafArea;
+    lastStats.resourceFactor = resourceFactor;
 
     const double biologicalDt = dt * SimulationConstants::BiologicalSecondsPerSimulationSecond;
     for (const LimbLight& lit : limbLight)
@@ -93,14 +105,18 @@ bool Organism::Simulate(float dt)
         const double branchSurfaceArea = BranchLateralArea(lit.limb->radius, lit.limb->length);
         const double leafArea = branchSurfaceArea * genome.leafAreaMultiplier;
         const double fixedCo2 = SimulationConstants::MaxLeafAssimilationMolCo2PerM2Second * leafArea * lit.exposure * resourceFactor * biologicalDt;
-        energy += fixedCo2 * SimulationConstants::EnergyJPerMolCo2Fixed;
+        const double gainedEnergy = fixedCo2 * SimulationConstants::EnergyJPerMolCo2Fixed;
+        energy += gainedEnergy;
+        lastStats.photosynthesisEnergy += gainedEnergy;
     }
 
     for (const auto& limb : limbs)
     {
         const double branchSurfaceArea = BranchLateralArea(limb->radius, limb->length);
         const double respiredCo2 = SimulationConstants::WoodyRespirationMolCo2PerM2Second * branchSurfaceArea * biologicalDt;
-        energy -= respiredCo2 * SimulationConstants::EnergyJPerMolCo2Fixed;
+        const double respirationEnergy = respiredCo2 * SimulationConstants::EnergyJPerMolCo2Fixed;
+        energy -= respirationEnergy;
+        lastStats.respirationEnergy += respirationEnergy;
     }
 
     std::sort(limbLight.begin(), limbLight.end(), [](const LimbLight& a, const LimbLight& b)
@@ -124,6 +140,8 @@ bool Organism::Simulate(float dt)
         lit.limb->length = newLength;
         lit.limb->radius = newRadius;
         energy -= growthCost;
+        lastStats.shootGrowthCost += growthCost;
+        lastStats.shootGrowthLength += growth;
     }
 
     const double rootGrowth = genome.rootGrowthRate * biologicalDt * (1.0 - resourceFactor);
@@ -141,6 +159,8 @@ bool Organism::Simulate(float dt)
             rootSystem->length = newLength;
             rootSystem->radius = newRadius;
             energy -= growthCost;
+            lastStats.rootGrowthCost += growthCost;
+            lastStats.rootGrowthLength += static_cast<float>(rootGrowth);
         }
     }
 
@@ -178,15 +198,24 @@ bool Organism::Simulate(float dt)
     UpdateBranchWeights(rootSystem);
     if (ExceedsStrength(core))
     {
-        energy -= SimulationConstants::FractureEnergyLossPerNewton * core->carriedWeight;
+        const double energyLoss = SimulationConstants::FractureEnergyLossPerNewton * core->carriedWeight;
+        energy -= energyLoss;
+        lastStats.fractureEnergyLoss += energyLoss;
+        lastStats.diedFromCoreFracture = true;
         core.reset();
         alive = false;
+        lastStats.alive = false;
+        lastStats.energyEnd = energy;
         return alive;
     }
 
-    energy -= PruneOverstressedBranches(core);
+    const double fractureEnergyLoss = PruneOverstressedBranches(core);
+    energy -= fractureEnergyLoss;
+    lastStats.fractureEnergyLoss += fractureEnergyLoss;
     UpdateBranchWeights(core);
     alive = energy >= SimulationConstants::OrganismDeathEnergyJ;
+    lastStats.alive = alive;
+    lastStats.energyEnd = energy;
     return alive;
 }
 
@@ -250,6 +279,11 @@ bool Organism::TryReproduce(double energyCost)
 const Organism::Genome& Organism::GetGenome() const
 {
     return genome;
+}
+
+const Organism::Stats& Organism::GetLastStats() const
+{
+    return lastStats;
 }
 
 Organism::Genome Organism::MakeMutatedGenome(std::mt19937& randomGenerator) const

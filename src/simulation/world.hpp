@@ -34,10 +34,20 @@ private:
     };
 
     void SpawnSeeds(const glm::vec3& origin, unsigned int count, Organism& parent);
-    void SimulateSeeds(float dt);
+    unsigned int SimulateSeeds(float dt);
+    void PrintProfilingSummary(
+        unsigned int organismsBefore,
+        unsigned int organismsAfter,
+        unsigned int deaths,
+        unsigned int coreFractureDeaths,
+        unsigned int seedsSpawned,
+        unsigned int seedsGerminated,
+        const Organism::Stats& totals,
+        float maxHeight);
 
     unsigned int ids = 0;
     float time = 0;
+    float nextProfilingPrint = SimulationConstants::ProfilingPrintIntervalSeconds;
     std::mt19937 randomGenerator;
     std::vector<std::unique_ptr<Organism>> organisms;
     std::vector<Seed> seeds;
