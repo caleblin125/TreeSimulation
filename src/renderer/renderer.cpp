@@ -4,6 +4,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <filesystem>
 #include <iostream>
+#include <utility>
 
 namespace
 {
@@ -251,12 +252,33 @@ Renderer::~Renderer()
 
 void Renderer::DrawLimb(std::weak_ptr<Limb> limb)
 {
+    const std::shared_ptr<Limb> limbPtr = limb.lock();
+    if (!limbPtr)
+        return;
+
+    const Limb::LimbData data = limbPtr->GetData();
+    DrawLimb({data.root, data.length, data.radius, data.orientation});
+}
+
+void Renderer::DrawLimb(const RenderLimb& limb)
+{
     limbList.push_back(limb);
 }
 
 void Renderer::DrawBoundingBox(const Organism::BoundingBox& bounds)
 {
     boundingBoxes.push_back(bounds);
+}
+
+void Renderer::SetFrame(RenderFrame frame)
+{
+    limbList = std::move(frame.limbs);
+    boundingBoxes = std::move(frame.boundingBoxes);
+}
+
+bool Renderer::IsAlive() const
+{
+    return alive;
 }
 
 bool Renderer::Update()
@@ -297,18 +319,11 @@ bool Renderer::Update()
     glDrawArrays(GL_TRIANGLES, 0, 6);
 
     glBindVertexArray(limbVAO);
-    for(auto& limb : limbList){
-        if(limb.expired()){
-            continue;
-        }
-        std::shared_ptr<Limb> limb_ptr = limb.lock();
-        Limb::LimbData data = limb_ptr->GetData();
-        limb_ptr.reset();
-
+    for(const RenderLimb& limb : limbList){
         model = glm::mat4(1.0f);
-        model = glm::translate(model, data.root);
-        model *= glm::mat4_cast(data.orientation);
-        model = glm::scale(model, {data.radius, data.length, data.radius});
+        model = glm::translate(model, limb.root);
+        model *= glm::mat4_cast(limb.orientation);
+        model = glm::scale(model, {limb.radius, limb.length, limb.radius});
 
         // glm::vec3 dir = data.orientation * glm::vec3(1,0,0);
 
@@ -328,6 +343,61 @@ bool Renderer::Update()
 
     glfwSwapBuffers(window);
     return true;
+}
+
+RenderPipeline::RenderPipeline()
+{
+    running = true;
+    renderThread = std::thread(&RenderPipeline::RenderLoop, this);
+}
+
+RenderPipeline::~RenderPipeline()
+{
+    Stop();
+}
+
+bool RenderPipeline::IsRunning() const
+{
+    return running.load();
+}
+
+void RenderPipeline::SubmitFrame(RenderFrame frame)
+{
+    std::lock_guard<std::mutex> lock(frameMutex);
+    pendingFrame = std::move(frame);
+    hasPendingFrame = true;
+}
+
+void RenderPipeline::Stop()
+{
+    running = false;
+    if (renderThread.joinable())
+        renderThread.join();
+}
+
+void RenderPipeline::RenderLoop()
+{
+    Renderer renderer;
+    RenderFrame currentFrame;
+
+    while (running.load() && renderer.IsAlive())
+    {
+        {
+            std::lock_guard<std::mutex> lock(frameMutex);
+            if (hasPendingFrame)
+            {
+                currentFrame = std::move(pendingFrame);
+                pendingFrame = {};
+                hasPendingFrame = false;
+            }
+        }
+
+        renderer.SetFrame(currentFrame);
+        if (!renderer.Update())
+            break;
+    }
+
+    running = false;
 }
 
 void Renderer::DrawDebugBoundingBoxes()
