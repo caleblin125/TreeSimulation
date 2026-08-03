@@ -267,6 +267,16 @@ void TestPropaguleEstablishment()
     Expect(successfulWorld.GetPropaguleCount() == 0, "successful propagule is removed after germination");
     Expect(successfulWorld.GetOrganismCount() == 1, "certain-establishment propagule germinates");
 }
+
+void TestWorldInitialOrganismsHaveLimbs()
+{
+    World world;
+    for (int i = 0; i < 15; ++i)
+        world.MakeOrganism(glm::vec3(static_cast<float>(i), 0.0f, 0.0f), glm::identity<glm::quat>());
+
+    Expect(world.GetOrganismCount() == 15, "world starts with requested organism count");
+    Expect(world.GetLimbs().size() == 30, "each starting proto-tree contributes an upward and downward limb");
+}
 }
 
 int main()
@@ -281,6 +291,7 @@ int main()
     TestReproductionGates();
     TestGenomeMutationClamps();
     TestPropaguleEstablishment();
+    TestWorldInitialOrganismsHaveLimbs();
 
     if (failures > 0)
     {

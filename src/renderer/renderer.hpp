@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <mutex>
 #include <memory>
 #include <thread>
@@ -90,8 +91,10 @@ private:
     void RenderLoop();
 
     mutable std::mutex frameMutex;
+    std::condition_variable frameCondition;
     RenderFrame pendingFrame;
     bool hasPendingFrame = false;
+    bool initialized = false;
     std::atomic<bool> running{false};
     std::thread renderThread;
 };

@@ -2,6 +2,7 @@
 
 #include <math.h>
 #include <glm/gtc/type_ptr.hpp>
+#include <chrono>
 #include <filesystem>
 #include <iostream>
 #include <utility>
@@ -349,6 +350,12 @@ RenderPipeline::RenderPipeline()
 {
     running = true;
     renderThread = std::thread(&RenderPipeline::RenderLoop, this);
+
+    std::unique_lock<std::mutex> lock(frameMutex);
+    frameCondition.wait(lock, [this]
+    {
+        return initialized;
+    });
 }
 
 RenderPipeline::~RenderPipeline()
@@ -363,14 +370,18 @@ bool RenderPipeline::IsRunning() const
 
 void RenderPipeline::SubmitFrame(RenderFrame frame)
 {
-    std::lock_guard<std::mutex> lock(frameMutex);
-    pendingFrame = std::move(frame);
-    hasPendingFrame = true;
+    {
+        std::lock_guard<std::mutex> lock(frameMutex);
+        pendingFrame = std::move(frame);
+        hasPendingFrame = true;
+    }
+    frameCondition.notify_one();
 }
 
 void RenderPipeline::Stop()
 {
     running = false;
+    frameCondition.notify_one();
     if (renderThread.joinable())
         renderThread.join();
 }
@@ -379,18 +390,46 @@ void RenderPipeline::RenderLoop()
 {
     Renderer renderer;
     RenderFrame currentFrame;
+    bool hasCurrentFrame = false;
+
+    {
+        std::lock_guard<std::mutex> lock(frameMutex);
+        initialized = true;
+        if (!renderer.IsAlive())
+            running = false;
+    }
+    frameCondition.notify_all();
 
     while (running.load() && renderer.IsAlive())
     {
         {
-            std::lock_guard<std::mutex> lock(frameMutex);
+            std::unique_lock<std::mutex> lock(frameMutex);
+            if (!hasCurrentFrame)
+            {
+                frameCondition.wait(lock, [this]
+                {
+                    return hasPendingFrame || !running.load();
+                });
+            }
+            else if (!hasPendingFrame)
+            {
+                frameCondition.wait_for(lock, std::chrono::milliseconds(1), [this]
+                {
+                    return hasPendingFrame || !running.load();
+                });
+            }
+
             if (hasPendingFrame)
             {
                 currentFrame = std::move(pendingFrame);
                 pendingFrame = {};
                 hasPendingFrame = false;
+                hasCurrentFrame = true;
             }
         }
+
+        if (!hasCurrentFrame)
+            continue;
 
         renderer.SetFrame(currentFrame);
         if (!renderer.Update())

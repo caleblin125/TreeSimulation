@@ -38,8 +38,8 @@ int main()
     // 2. Standard mersenne_twister_engine seeded with rd()
     std::mt19937 gen(rd());
 
-    float low = -100.0f;
-    float high = 100.0f;
+    float low = -20.0f;
+    float high = 20.0f;
     std::uniform_real_distribution<float> dis(low, high);
 
     RenderPipeline renderPipeline;
@@ -51,7 +51,7 @@ int main()
 
     std::size_t limbCount = 0;
     renderPipeline.SubmitFrame(BuildRenderFrame(world, limbCount));
-    printf("Limbs: %zu \n", limbCount);
+    printf("Initial trees: %zu limbs: %zu \n", world.GetOrganismCount(), limbCount);
     
     while (renderPipeline.IsRunning()){
         world.Simulate(SimulationConstants::DefaultTimeStepYears);
