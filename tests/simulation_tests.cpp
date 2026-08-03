@@ -136,6 +136,17 @@ void TestLimbSurfaceResourceAccounting()
     ExpectNear(downward.GroundExtractionArea(), downward.SurfaceArea() * 3.0, 1.0e-9, "ground extraction multiplier scales underground area");
 }
 
+void TestLimbNutrientPathLength()
+{
+    auto parent = std::make_shared<Limb>(glm::vec3(0.0f), glm::identity<glm::quat>(), 2.0f, 0.1f, 1.0);
+    parent->Spawn(0.75f, glm::identity<glm::quat>(), 1.0f, 0.05f);
+    parent->UpdatePose();
+
+    const std::shared_ptr<Limb> child = parent->GetChildren().front().lock();
+    ExpectNear(parent->NutrientPathLength(), 1.0, 1.0e-9, "parent nutrient path reaches its midpoint");
+    ExpectNear(child->NutrientPathLength(), 2.0, 1.0e-9, "child nutrient path includes parent attachment distance and child midpoint");
+}
+
 void TestInitialRootAndBounds()
 {
     Organism organism(1, glm::vec3(0.0f), glm::identity<glm::quat>());
@@ -172,6 +183,29 @@ void TestMonthlyGrowth()
     Expect(alive, "organism remains alive after one monthly step");
     Expect(heightAfter > heightBefore, "shoot grows during a monthly step");
     Expect(organism.GetLastStats().shootGrowthLength > 0.0f, "growth stats record shoot elongation");
+}
+
+void TestNutrientTransportCostScalesWithPathLength()
+{
+    Organism::Genome shortGenome;
+    shortGenome.seedInitialEnergy = 1'000'000.0;
+    shortGenome.branchSpawnEnergy = 1.0e12;
+
+    Organism::Genome tallGenome = shortGenome;
+    tallGenome.initialShootLength = 2.0f;
+    tallGenome.initialRootLength = 0.5f;
+    tallGenome.initialRadius = 0.05f;
+    tallGenome.woodDensity = 100.0;
+    tallGenome.bendingStrength = 1.0e12;
+
+    Organism shortOrganism(10, glm::vec3(0.0f), glm::identity<glm::quat>(), shortGenome);
+    Organism tallOrganism(11, glm::vec3(0.0f), glm::identity<glm::quat>(), tallGenome);
+
+    shortOrganism.Simulate(SimulationConstants::MaxStableStepYears);
+    tallOrganism.Simulate(SimulationConstants::MaxStableStepYears);
+
+    Expect(shortOrganism.GetLastStats().nutrientTransportEnergy > 0.0, "photosynthetic limbs pay nutrient transport cost");
+    Expect(tallOrganism.GetLastStats().nutrientTransportEnergy > shortOrganism.GetLastStats().nutrientTransportEnergy, "longer nutrient paths cost more energy");
 }
 
 void TestDefaultProtoTreeSurvivesAsSimpleForm()
@@ -321,8 +355,10 @@ int main()
     TestGeometry();
     TestPhysics();
     TestLimbSurfaceResourceAccounting();
+    TestLimbNutrientPathLength();
     TestInitialRootAndBounds();
     TestMonthlyGrowth();
+    TestNutrientTransportCostScalesWithPathLength();
     TestDefaultProtoTreeSurvivesAsSimpleForm();
     TestDefaultProtoTreeSurvivesStableSubsteps();
     TestLimbBrainControlsSplitAndReproduction();

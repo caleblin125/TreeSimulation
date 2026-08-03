@@ -65,6 +65,7 @@ class Organism{
             double energyEnd = 0.0;
             double photosynthesisEnergy = 0.0;
             double respirationEnergy = 0.0;
+            double nutrientTransportEnergy = 0.0;
             double shootGrowthCost = 0.0;
             double rootGrowthCost = 0.0;
             double fractureEnergyLoss = 0.0;

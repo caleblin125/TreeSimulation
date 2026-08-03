@@ -52,6 +52,7 @@ public:
     double AboveGroundSurfaceArea() const;
     double UndergroundSurfaceArea() const;
     double GroundExtractionArea() const;
+    double NutrientPathLength() const;
     bool IsUnderground() const;
     bool CanPhotosynthesize() const;
     bool RayIntersects(const glm::vec3& origin, const glm::vec3& direction) const;

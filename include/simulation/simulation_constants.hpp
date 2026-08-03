@@ -24,6 +24,7 @@ namespace SimulationConstants
     constexpr double EnergyJPerMolCo2Fixed = GlucoseEnergyJPerMol / Co2MolPerGlucoseMol;
     constexpr double LeafAreaPerBranchSurfaceArea = 8.0;
     constexpr double WoodyRespirationMolCo2PerM2Second = 0.8e-6;
+    constexpr double NutrientTransportEnergyFractionPerMeter = 0.015;
 
     // Growth/reproduction tuning, SI-ish but still simplified by the current tree model.
     constexpr double WoodConstructionEnergyJPerKg = 17.0e6;

@@ -172,6 +172,22 @@ double Limb::GroundExtractionArea() const
     return UndergroundSurfaceArea() * groundExtraction;
 }
 
+double Limb::NutrientPathLength() const
+{
+    double distance = static_cast<double>(length) * 0.5;
+    std::shared_ptr<const Limb> currentParent = parent.lock();
+    const Limb* currentChild = this;
+
+    while (currentParent)
+    {
+        distance += static_cast<double>(currentParent->length) * std::clamp(static_cast<double>(currentChild->attachment), 0.0, 1.0);
+        currentChild = currentParent.get();
+        currentParent = currentParent->parent.lock();
+    }
+
+    return distance;
+}
+
 bool Limb::IsUnderground() const
 {
     return UndergroundSurfaceArea() > 0.0;

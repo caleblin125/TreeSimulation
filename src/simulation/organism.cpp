@@ -82,8 +82,12 @@ bool Organism::Simulate(float dtYears)
         const double leafArea = branchSurfaceArea * genome.leafAreaMultiplier;
         const double fixedCo2 = SimulationConstants::MaxLeafAssimilationMolCo2PerM2Second * leafArea * lit.exposure * resourceFactor * activeSeconds;
         const double gainedEnergy = fixedCo2 * SimulationConstants::EnergyJPerMolCo2Fixed;
+        const double transportDistance = lit.limb->NutrientPathLength();
+        const double transportEnergy = gainedEnergy * SimulationConstants::NutrientTransportEnergyFractionPerMeter * transportDistance;
         energy += gainedEnergy;
+        energy -= transportEnergy;
         lastStats.photosynthesisEnergy += gainedEnergy;
+        lastStats.nutrientTransportEnergy += transportEnergy;
     }
 
     for (const auto& limb : limbs)
