@@ -26,6 +26,7 @@ public:
     std::size_t GetPropaguleCount() const;
     std::vector<std::weak_ptr<Limb>> GetLimbs();
     std::vector<Organism::BoundingBox> GetBoundingBoxes();
+    std::vector<Organism::NeuralNetworkSample> GetNeuralNetworkSamples(std::size_t maxSamples) const;
 
 private:
     struct Propagule

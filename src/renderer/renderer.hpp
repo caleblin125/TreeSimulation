@@ -28,6 +28,7 @@ struct RenderFrame
 {
     std::vector<RenderLimb> limbs;
     std::vector<Organism::BoundingBox> boundingBoxes;
+    std::vector<Organism::NeuralNetworkSample> neuralSamples;
 };
 
 class Renderer {
@@ -45,6 +46,7 @@ private:
     void ProcessKeyboardInput(float deltaTime);
     void ProcessMouseInput();
     void DrawDebugBoundingBoxes();
+    void DrawNeuralNetworkWindow();
 
     bool alive = false;
     GLFWwindow* window = nullptr;
@@ -61,6 +63,7 @@ private:
     unsigned int boxVAO = 0;
     unsigned int boxVBO = 0;
     std::vector<Organism::BoundingBox> boundingBoxes;
+    std::vector<Organism::NeuralNetworkSample> neuralSamples;
 
     Shader shader;
     Camera camera;
@@ -72,6 +75,7 @@ private:
     bool leftMouseDown = false;
     bool debugBounds = false;
     bool debugKeyWasDown = false;
+    bool imguiInitialized = false;
 };
 
 class RenderPipeline

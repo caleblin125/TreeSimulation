@@ -2,9 +2,13 @@
 
 #include <math.h>
 #include <glm/gtc/type_ptr.hpp>
+#include <imgui.h>
+#include <imgui_impl_glfw.h>
+#include <imgui_impl_opengl3.h>
 #include <chrono>
 #include <filesystem>
 #include <iostream>
+#include <string>
 #include <utility>
 
 namespace
@@ -101,6 +105,12 @@ Renderer::Renderer()
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
 
     glViewport(0, 0, 800, 600);
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGui::StyleColorsDark();
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init("#version 330");
+    imguiInitialized = true;
 
     const std::string vertexShaderPath = ResolveShaderPath("src/renderer/shaders/plane.vert");
     const std::string fragmentShaderPath = ResolveShaderPath("src/renderer/shaders/plane.frag");
@@ -230,6 +240,13 @@ void Renderer::ProcessMouseInput()
 
 Renderer::~Renderer()
 {
+    if (imguiInitialized)
+    {
+        ImGui_ImplOpenGL3_Shutdown();
+        ImGui_ImplGlfw_Shutdown();
+        ImGui::DestroyContext();
+    }
+
     if (limbVAO)
         glDeleteVertexArrays(1, &limbVAO);
     if (limbVBO)
@@ -275,6 +292,7 @@ void Renderer::SetFrame(RenderFrame frame)
 {
     limbList = std::move(frame.limbs);
     boundingBoxes = std::move(frame.boundingBoxes);
+    neuralSamples = std::move(frame.neuralSamples);
 }
 
 bool Renderer::IsAlive() const
@@ -299,6 +317,10 @@ bool Renderer::Update()
     lastFrameTime = currentTime;
     ProcessKeyboardInput(deltaTime);
     ProcessMouseInput();
+
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
 
     glClearColor(0.2f, 0.3f, 0.4f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -341,6 +363,10 @@ bool Renderer::Update()
 
     DrawDebugBoundingBoxes();
     boundingBoxes.clear();
+
+    DrawNeuralNetworkWindow();
+    ImGui::Render();
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
     glfwSwapBuffers(window);
     return true;
@@ -437,6 +463,59 @@ void RenderPipeline::RenderLoop()
     }
 
     running = false;
+}
+
+void Renderer::DrawNeuralNetworkWindow()
+{
+    ImGui::Begin("Neural network samples");
+    ImGui::Text("Samples: %zu", neuralSamples.size());
+
+    static const char* outputNames[] = {"elongate", "thicken", "root", "split", "reproduce"};
+    static const char* inputNames[] = {"bias", "energy", "resource", "sun", "underground", "length", "torque", "age", "height"};
+
+    for (std::size_t sampleIndex = 0; sampleIndex < neuralSamples.size(); ++sampleIndex)
+    {
+        const Organism::NeuralNetworkSample& sample = neuralSamples[sampleIndex];
+        const std::string label = "Organism " + std::to_string(sample.id);
+        if (!ImGui::CollapsingHeader(label.c_str(), sampleIndex == 0 ? ImGuiTreeNodeFlags_DefaultOpen : 0))
+            continue;
+
+        ImGui::Text("age %.2f years   energy %.1f J", sample.ageYears, sample.energy);
+        ImGui::Text("limbs %u   height %.2f m   resource %.2f", sample.stats.limbCount, sample.stats.maxHeight, sample.stats.resourceFactor);
+        ImGui::Text("reproduce %.2f   split signals %u", sample.stats.reproductionPressure, sample.stats.splitSignals);
+        ImGui::Text("photo %.1f J   transport %.1f J   respiration %.1f J",
+            sample.stats.photosynthesisEnergy,
+            sample.stats.nutrientTransportEnergy,
+            sample.stats.respirationEnergy);
+
+        if (ImGui::BeginTable(("weights##" + std::to_string(sample.id)).c_str(), static_cast<int>(Organism::GrowthBrainInputCount + 2), ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
+        {
+            ImGui::TableSetupColumn("output");
+            for (const char* inputName : inputNames)
+                ImGui::TableSetupColumn(inputName);
+            ImGui::TableHeadersRow();
+
+            for (std::size_t outputIndex = 0; outputIndex < Organism::GrowthBrainOutputCount; ++outputIndex)
+            {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::TextUnformatted(outputNames[outputIndex]);
+                const std::size_t weightOffset = outputIndex * (Organism::GrowthBrainInputCount + 1);
+                for (std::size_t inputIndex = 0; inputIndex < Organism::GrowthBrainInputCount + 1; ++inputIndex)
+                {
+                    const double weight = sample.weights[weightOffset + inputIndex];
+                    ImGui::TableSetColumnIndex(static_cast<int>(inputIndex + 1));
+                    ImGui::TextColored(
+                        weight >= 0.0 ? ImVec4(0.45f, 0.95f, 0.55f, 1.0f) : ImVec4(0.95f, 0.45f, 0.45f, 1.0f),
+                        "%.2f",
+                        weight);
+                }
+            }
+            ImGui::EndTable();
+        }
+    }
+
+    ImGui::End();
 }
 
 void Renderer::DrawDebugBoundingBoxes()

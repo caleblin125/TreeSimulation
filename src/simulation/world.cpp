@@ -155,6 +155,19 @@ std::vector<Organism::BoundingBox> World::GetBoundingBoxes()
     return ret;
 }
 
+std::vector<Organism::NeuralNetworkSample> World::GetNeuralNetworkSamples(std::size_t maxSamples) const
+{
+    std::vector<Organism::NeuralNetworkSample> ret;
+    ret.reserve(std::min(maxSamples, organisms.size()));
+    for (const auto& organism : organisms)
+    {
+        if (ret.size() >= maxSamples)
+            break;
+        ret.push_back(organism->GetNeuralNetworkSample());
+    }
+    return ret;
+}
+
 void World::SpawnPropagules(const glm::vec3& origin, unsigned int count, Organism& parent)
 {
     std::uniform_real_distribution<float> angleDistribution(0.0f, 2.0f * static_cast<float>(SimulationConstants::Pi));

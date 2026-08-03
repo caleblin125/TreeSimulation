@@ -364,6 +364,11 @@ const Organism::Stats& Organism::GetLastStats() const
     return lastStats;
 }
 
+Organism::NeuralNetworkSample Organism::GetNeuralNetworkSample() const
+{
+    return {id, ageYears, energy, lastStats, genome.growthBrainWeights};
+}
+
 Organism::Genome Organism::MakeMutatedGenome(std::mt19937& randomGenerator) const
 {
     Genome mutated = genome;

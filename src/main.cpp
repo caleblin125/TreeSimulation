@@ -26,6 +26,7 @@ RenderFrame BuildRenderFrame(World& world, std::size_t& limbCount)
     }
 
     frame.boundingBoxes = world.GetBoundingBoxes();
+    frame.neuralSamples = world.GetNeuralNetworkSamples(4);
     return frame;
 }
 }

@@ -4,6 +4,8 @@ project(TreeSim)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+include(FetchContent)
+
 find_package(OpenGL REQUIRED)
 find_package(Threads REQUIRED)
 find_package(glm CONFIG REQUIRED)
@@ -21,6 +23,34 @@ add_library(glad
 target_include_directories(glad PUBLIC
     external/glad/include
 )
+
+FetchContent_Declare(
+    imgui
+    URL https://github.com/ocornut/imgui/archive/refs/tags/v1.91.9b.zip
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+FetchContent_MakeAvailable(imgui)
+
+add_library(imgui STATIC
+    ${imgui_SOURCE_DIR}/imgui.cpp
+    ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
+)
+target_include_directories(imgui PUBLIC
+    ${imgui_SOURCE_DIR}
+    ${imgui_SOURCE_DIR}/backends
+)
+
+if (TARGET glfw)
+    target_link_libraries(imgui PUBLIC glfw)
+else()
+    target_include_directories(imgui PUBLIC ${GLFW_INCLUDE_DIRS})
+    target_link_libraries(imgui PUBLIC ${GLFW_LIBRARIES})
+endif()
+target_link_libraries(imgui PUBLIC glad OpenGL::GL)
 
 add_library(TreeSimCore
     src/simulation/world.cpp
@@ -49,6 +79,7 @@ else()
 endif()
 target_link_libraries(TreeSimRenderer PUBLIC
     glad
+    imgui
     OpenGL::GL
     Threads::Threads
     TreeSimCore

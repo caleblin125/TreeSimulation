@@ -82,6 +82,15 @@ class Organism{
             bool alive = true;
         };
 
+        struct NeuralNetworkSample
+        {
+            unsigned int id = 0;
+            float ageYears = 0.0f;
+            double energy = 0.0;
+            Stats stats;
+            std::array<double, GrowthBrainWeightCount> weights{};
+        };
+
         Organism(unsigned int id, glm::vec3 root, glm::quat orientation);
         Organism(unsigned int id, glm::vec3 root, glm::quat orientation, Genome genome);
         bool Simulate(float dt);
@@ -95,6 +104,7 @@ class Organism{
         bool TryReproduce(unsigned int seedCount, double dtYears);
         const Genome& GetGenome() const;
         const Stats& GetLastStats() const;
+        NeuralNetworkSample GetNeuralNetworkSample() const;
         Genome MakeMutatedGenome(std::mt19937& randomGenerator) const;
 
     private:
