@@ -9,7 +9,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
-#include "organism.hpp"
+#include "simulation/organism.hpp"
 
 class World
 {

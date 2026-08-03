@@ -1,5 +1,5 @@
-#include "limb.hpp"
-#include "simulation_constants.hpp"
+#include "simulation/limb.hpp"
+#include "simulation/simulation_constants.hpp"
 
 #include <iostream>
 

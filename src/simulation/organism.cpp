@@ -1,7 +1,7 @@
-#include "organism.hpp"
-#include "geometry.hpp"
-#include "physics.hpp"
-#include "simulation_constants.hpp"
+#include "simulation/organism.hpp"
+#include "simulation/geometry.hpp"
+#include "simulation/physics.hpp"
+#include "simulation/simulation_constants.hpp"
 
 #include <algorithm>
 #include <cmath>

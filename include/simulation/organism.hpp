@@ -8,9 +8,9 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
-#include "limb.hpp"
-#include "geometry.hpp"
-#include "simulation_constants.hpp"
+#include "simulation/limb.hpp"
+#include "simulation/geometry.hpp"
+#include "simulation/simulation_constants.hpp"
 
 class Organism{
     public:

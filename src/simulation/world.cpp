@@ -1,5 +1,5 @@
-#include "world.hpp"
-#include "simulation_constants.hpp"
+#include "simulation/world.hpp"
+#include "simulation/simulation_constants.hpp"
 
 #include <iostream>
 #include <algorithm>

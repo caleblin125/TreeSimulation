@@ -6,8 +6,8 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 
-#include "limb.hpp"
-#include "organism.hpp"
+#include "simulation/limb.hpp"
+#include "simulation/organism.hpp"
 
 #include "camera.hpp"
 #include "shader.hpp"

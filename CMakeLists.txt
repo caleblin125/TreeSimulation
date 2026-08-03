@@ -29,7 +29,7 @@ add_library(TreeSimCore
     src/simulation/physics.cpp
 )
 target_include_directories(TreeSimCore PUBLIC
-    src/simulation
+    include
 )
 
 add_library(TreeSimRenderer

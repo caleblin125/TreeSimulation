@@ -1,7 +1,7 @@
-#include "physics.hpp"
+#include "simulation/physics.hpp"
 
-#include "geometry.hpp"
-#include "simulation_constants.hpp"
+#include "simulation/geometry.hpp"
+#include "simulation/simulation_constants.hpp"
 
 namespace Physics
 {
