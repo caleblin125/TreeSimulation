@@ -186,6 +186,8 @@ void TestDefaultProtoTreeSurvivesAsSimpleForm()
     Expect(limbs.size() == 2, "default proto-tree remains one shoot plus one root during establishment");
     Expect(organism.GetLastStats().shootGrowthLength > 0.0f, "default proto-tree keeps growing upward");
     Expect(organism.GetLastStats().rootGrowthLength > 0.0f, "default proto-tree keeps growing downward");
+    Expect(organism.GetLastStats().splitSignals == 0, "default proto-tree does not branch during establishment");
+    Expect(organism.GetLastStats().reproductionPressure >= SimulationConstants::ReproductionSignalThreshold, "default proto-tree constantly tries reproduction");
 }
 
 void TestLimbBrainControlsSplitAndReproduction()

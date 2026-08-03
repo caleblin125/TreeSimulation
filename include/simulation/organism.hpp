@@ -49,11 +49,11 @@ class Organism{
             double propaguleEstablishmentProbability = SimulationConstants::PropaguleEstablishmentProbability;
             unsigned int seedsPerReproduction = SimulationConstants::SeedsPerReproduction;
             std::array<double, GrowthBrainWeightCount> growthBrainWeights = {
-                -0.20, 0.80, 0.15, 1.80, -1.20, -0.20, 0.40, -0.15, 0.10,
-                -0.65, 0.25, 0.10, 0.35, 0.15, 0.85, 1.80, 0.00, 0.20,
-                -0.70, 0.30, -1.35, 0.10, 2.20, -0.10, 0.20, 0.00, 0.00,
-                -2.80, 1.10, 0.25, 1.20, -3.00, 1.40, 0.40, 0.70, 0.65,
-                -2.60, 1.35, 0.35, 0.70, -1.50, 0.20, 0.25, 1.50, 0.90
+                3.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00,
+                0.50, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00,
+                3.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00,
+                -4.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00,
+                3.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00
             };
         };
 
