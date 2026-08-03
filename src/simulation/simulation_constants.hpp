@@ -8,6 +8,7 @@ namespace SimulationConstants
     constexpr double SecondsPerYear = 365.25 * 24.0 * 60.0 * 60.0;
     constexpr float YearsPerMonth = 1.0f / 12.0f;
     constexpr float DefaultTimeStepYears = YearsPerMonth;
+    constexpr float MaxStableStepYears = 1.0f / 48.0f;
     constexpr double ActivePhotosynthesisFractionOfYear = 0.45;
 
     // Mechanical properties, SI units.

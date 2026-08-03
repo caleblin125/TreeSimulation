@@ -25,33 +25,61 @@ void World::MakeOrganism(glm::vec3 root, glm::quat orientation, Organism::Genome
 
 void World::Simulate(float dtYears)
 {
-    timeYears += dtYears;
-
-    std::uniform_real_distribution<float> reproductionChance(0.0f, 1.0f);
     const unsigned int organismsBefore = static_cast<unsigned int>(organisms.size());
     unsigned int deaths = 0;
     unsigned int coreFractureDeaths = 0;
     unsigned int seedsSpawned = 0;
+    unsigned int seedsGerminated = 0;
+    unsigned int profileSamples = 0;
     Organism::Stats totals;
     float maxHeight = 0.0f;
+    float remainingYears = dtYears;
+
+    while (remainingYears > 0.0f)
+    {
+        const float substepYears = std::min(remainingYears, SimulationConstants::MaxStableStepYears);
+        SimulateSubstep(substepYears, deaths, coreFractureDeaths, seedsSpawned, seedsGerminated, profileSamples, totals, maxHeight);
+        remainingYears -= substepYears;
+    }
+
+    if (SimulationConstants::EnableSimulationProfiling && timeYears >= nextProfilingPrint)
+    {
+        PrintProfilingSummary(
+            organismsBefore,
+            static_cast<unsigned int>(organisms.size()),
+            deaths,
+            coreFractureDeaths,
+            seedsSpawned,
+            seedsGerminated,
+            profileSamples,
+            totals,
+            maxHeight);
+
+        while (timeYears >= nextProfilingPrint)
+            nextProfilingPrint += SimulationConstants::ProfilingPrintIntervalYears;
+    }
+}
+
+void World::SimulateSubstep(
+    float dtYears,
+    unsigned int& deaths,
+    unsigned int& coreFractureDeaths,
+    unsigned int& seedsSpawned,
+    unsigned int& seedsGerminated,
+    unsigned int& profileSamples,
+    Organism::Stats& totals,
+    float& maxHeight)
+{
+    timeYears += dtYears;
+
+    std::uniform_real_distribution<float> reproductionChance(0.0f, 1.0f);
 
     for (auto &o : organisms)
     {
         bool alive = o->Simulate(dtYears);
         const Organism::Stats& stats = o->GetLastStats();
-        totals.limbCount += stats.limbCount;
-        totals.energyStart += stats.energyStart;
-        totals.energyEnd += stats.energyEnd;
-        totals.photosynthesisEnergy += stats.photosynthesisEnergy;
-        totals.respirationEnergy += stats.respirationEnergy;
-        totals.shootGrowthCost += stats.shootGrowthCost;
-        totals.rootGrowthCost += stats.rootGrowthCost;
-        totals.fractureEnergyLoss += stats.fractureEnergyLoss;
-        totals.resourceFactor += stats.resourceFactor;
-        totals.leafArea += stats.leafArea;
-        totals.rootSurfaceArea += stats.rootSurfaceArea;
-        totals.shootGrowthLength += stats.shootGrowthLength;
-        totals.rootGrowthLength += stats.rootGrowthLength;
+        AccumulateStats(totals, stats);
+        profileSamples++;
         maxHeight = std::max(maxHeight, stats.maxHeight);
 
         if (!alive)
@@ -76,23 +104,7 @@ void World::Simulate(float dtYears)
                                    { return !p; }),
                     organisms.end());
 
-    const unsigned int seedsGerminated = SimulateSeeds(dtYears);
-
-    if (SimulationConstants::EnableSimulationProfiling && timeYears >= nextProfilingPrint)
-    {
-        PrintProfilingSummary(
-            organismsBefore,
-            static_cast<unsigned int>(organisms.size()),
-            deaths,
-            coreFractureDeaths,
-            seedsSpawned,
-            seedsGerminated,
-            totals,
-            maxHeight);
-
-        while (timeYears >= nextProfilingPrint)
-            nextProfilingPrint += SimulationConstants::ProfilingPrintIntervalYears;
-    }
+    seedsGerminated += SimulateSeeds(dtYears);
 }
 
 std::vector<std::weak_ptr<Limb>> World::GetLimbs()
@@ -172,6 +184,23 @@ unsigned int World::SimulateSeeds(float dtYears)
     return static_cast<unsigned int>(germinations.size());
 }
 
+void World::AccumulateStats(Organism::Stats& totals, const Organism::Stats& stats)
+{
+    totals.limbCount += stats.limbCount;
+    totals.energyStart += stats.energyStart;
+    totals.energyEnd += stats.energyEnd;
+    totals.photosynthesisEnergy += stats.photosynthesisEnergy;
+    totals.respirationEnergy += stats.respirationEnergy;
+    totals.shootGrowthCost += stats.shootGrowthCost;
+    totals.rootGrowthCost += stats.rootGrowthCost;
+    totals.fractureEnergyLoss += stats.fractureEnergyLoss;
+    totals.resourceFactor += stats.resourceFactor;
+    totals.leafArea += stats.leafArea;
+    totals.rootSurfaceArea += stats.rootSurfaceArea;
+    totals.shootGrowthLength += stats.shootGrowthLength;
+    totals.rootGrowthLength += stats.rootGrowthLength;
+}
+
 void World::PrintProfilingSummary(
     unsigned int organismsBefore,
     unsigned int organismsAfter,
@@ -179,13 +208,14 @@ void World::PrintProfilingSummary(
     unsigned int coreFractureDeaths,
     unsigned int seedsSpawned,
     unsigned int seedsGerminated,
+    unsigned int profileSamples,
     const Organism::Stats& totals,
     float maxHeight)
 {
-    const double organismCount = std::max(1u, organismsBefore);
-    const double avgResourceFactor = totals.resourceFactor / organismCount;
-    const double avgEnergyStart = totals.energyStart / organismCount;
-    const double avgEnergyEnd = totals.energyEnd / organismCount;
+    const double sampleCount = std::max(1u, profileSamples);
+    const double avgResourceFactor = totals.resourceFactor / sampleCount;
+    const double avgEnergyStart = totals.energyStart / sampleCount;
+    const double avgEnergyEnd = totals.energyEnd / sampleCount;
 
     std::cout
         << std::fixed << std::setprecision(3)

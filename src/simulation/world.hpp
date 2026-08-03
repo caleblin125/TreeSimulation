@@ -34,6 +34,16 @@ private:
 
     void SpawnSeeds(const glm::vec3& origin, unsigned int count, Organism& parent);
     unsigned int SimulateSeeds(float dt);
+    void SimulateSubstep(
+        float dtYears,
+        unsigned int& deaths,
+        unsigned int& coreFractureDeaths,
+        unsigned int& seedsSpawned,
+        unsigned int& seedsGerminated,
+        unsigned int& profileSamples,
+        Organism::Stats& totals,
+        float& maxHeight);
+    static void AccumulateStats(Organism::Stats& totals, const Organism::Stats& stats);
     void PrintProfilingSummary(
         unsigned int organismsBefore,
         unsigned int organismsAfter,
@@ -41,6 +51,7 @@ private:
         unsigned int coreFractureDeaths,
         unsigned int seedsSpawned,
         unsigned int seedsGerminated,
+        unsigned int profileSamples,
         const Organism::Stats& totals,
         float maxHeight);
 
