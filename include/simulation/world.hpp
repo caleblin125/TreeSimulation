@@ -24,22 +24,23 @@ public:
     std::vector<Organism::BoundingBox> GetBoundingBoxes();
 
 private:
-    struct Seed
+    struct Propagule
     {
         glm::vec3 position;
         float age;
-        float germinationTime;
+        float establishmentTime;
         Organism::Genome genome;
     };
 
-    void SpawnSeeds(const glm::vec3& origin, unsigned int count, Organism& parent);
-    unsigned int SimulateSeeds(float dt);
+    void SpawnPropagules(const glm::vec3& origin, unsigned int count, Organism& parent);
+    void SimulatePropagules(float dt, unsigned int& established, unsigned int& failed);
     void SimulateSubstep(
         float dtYears,
         unsigned int& deaths,
         unsigned int& coreFractureDeaths,
-        unsigned int& seedsSpawned,
-        unsigned int& seedsGerminated,
+        unsigned int& propagulesSpawned,
+        unsigned int& propagulesEstablished,
+        unsigned int& propagulesFailed,
         unsigned int& profileSamples,
         Organism::Stats& totals,
         float& maxHeight);
@@ -49,8 +50,9 @@ private:
         unsigned int organismsAfter,
         unsigned int deaths,
         unsigned int coreFractureDeaths,
-        unsigned int seedsSpawned,
-        unsigned int seedsGerminated,
+        unsigned int propagulesSpawned,
+        unsigned int propagulesEstablished,
+        unsigned int propagulesFailed,
         unsigned int profileSamples,
         const Organism::Stats& totals,
         float maxHeight);
@@ -60,5 +62,5 @@ private:
     float nextProfilingPrint = SimulationConstants::ProfilingPrintIntervalYears;
     std::mt19937 randomGenerator;
     std::vector<std::unique_ptr<Organism>> organisms;
-    std::vector<Seed> seeds;
+    std::vector<Propagule> propagules;
 };

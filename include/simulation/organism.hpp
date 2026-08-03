@@ -40,6 +40,7 @@ class Organism{
             float initialRadius = SimulationConstants::InitialSeedlingRadiusM;
             float minReproductionAgeYears = SimulationConstants::MinReproductionAgeYears;
             float minReproductionHeightM = SimulationConstants::MinReproductionHeightM;
+            double propaguleEstablishmentProbability = SimulationConstants::PropaguleEstablishmentProbability;
             unsigned int seedsPerReproduction = SimulationConstants::SeedsPerReproduction;
         };
 

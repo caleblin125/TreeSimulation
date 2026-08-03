@@ -28,8 +28,9 @@ void World::Simulate(float dtYears)
     const unsigned int organismsBefore = static_cast<unsigned int>(organisms.size());
     unsigned int deaths = 0;
     unsigned int coreFractureDeaths = 0;
-    unsigned int seedsSpawned = 0;
-    unsigned int seedsGerminated = 0;
+    unsigned int propagulesSpawned = 0;
+    unsigned int propagulesEstablished = 0;
+    unsigned int propagulesFailed = 0;
     unsigned int profileSamples = 0;
     Organism::Stats totals;
     float maxHeight = 0.0f;
@@ -38,7 +39,7 @@ void World::Simulate(float dtYears)
     while (remainingYears > 0.0f)
     {
         const float substepYears = std::min(remainingYears, SimulationConstants::MaxStableStepYears);
-        SimulateSubstep(substepYears, deaths, coreFractureDeaths, seedsSpawned, seedsGerminated, profileSamples, totals, maxHeight);
+        SimulateSubstep(substepYears, deaths, coreFractureDeaths, propagulesSpawned, propagulesEstablished, propagulesFailed, profileSamples, totals, maxHeight);
         remainingYears -= substepYears;
     }
 
@@ -49,8 +50,9 @@ void World::Simulate(float dtYears)
             static_cast<unsigned int>(organisms.size()),
             deaths,
             coreFractureDeaths,
-            seedsSpawned,
-            seedsGerminated,
+            propagulesSpawned,
+            propagulesEstablished,
+            propagulesFailed,
             profileSamples,
             totals,
             maxHeight);
@@ -64,8 +66,9 @@ void World::SimulateSubstep(
     float dtYears,
     unsigned int& deaths,
     unsigned int& coreFractureDeaths,
-    unsigned int& seedsSpawned,
-    unsigned int& seedsGerminated,
+    unsigned int& propagulesSpawned,
+    unsigned int& propagulesEstablished,
+    unsigned int& propagulesFailed,
     unsigned int& profileSamples,
     Organism::Stats& totals,
     float& maxHeight)
@@ -96,15 +99,15 @@ void World::SimulateSubstep(
         if (reproductionChance(randomGenerator) < SimulationConstants::ReproductionAttemptsPerYear * dtYears &&
             o->TryReproduce(genome.seedsPerReproduction, dtYears))
         {
-            SpawnSeeds(o->GetSeedOrigin(), genome.seedsPerReproduction, *o);
-            seedsSpawned += genome.seedsPerReproduction;
+            SpawnPropagules(o->GetSeedOrigin(), genome.seedsPerReproduction, *o);
+            propagulesSpawned += genome.seedsPerReproduction;
         }
     }
     organisms.erase(std::remove_if(organisms.begin(), organisms.end(), [](const auto &p)
                                    { return !p; }),
                     organisms.end());
 
-    seedsGerminated += SimulateSeeds(dtYears);
+    SimulatePropagules(dtYears, propagulesEstablished, propagulesFailed);
 }
 
 std::vector<std::weak_ptr<Limb>> World::GetLimbs()
@@ -131,20 +134,20 @@ std::vector<Organism::BoundingBox> World::GetBoundingBoxes()
     return ret;
 }
 
-void World::SpawnSeeds(const glm::vec3& origin, unsigned int count, Organism& parent)
+void World::SpawnPropagules(const glm::vec3& origin, unsigned int count, Organism& parent)
 {
     std::uniform_real_distribution<float> angleDistribution(0.0f, 2.0f * static_cast<float>(SimulationConstants::Pi));
     std::uniform_real_distribution<float> radiusDistribution(SimulationConstants::SeedMinDispersalRadiusM, SimulationConstants::SeedMaxDispersalRadiusM);
     std::uniform_real_distribution<float> germinationDistribution(SimulationConstants::SeedMinGerminationYears, SimulationConstants::SeedMaxGerminationYears);
 
-    seeds.reserve(seeds.size() + count);
+    propagules.reserve(propagules.size() + count);
     for (unsigned int i = 0; i < count; ++i)
     {
         const float angle = angleDistribution(randomGenerator);
         const float radius = radiusDistribution(randomGenerator);
         const glm::vec3 direction(std::cos(angle), 0.0f, std::sin(angle));
 
-        seeds.push_back({
+        propagules.push_back({
             {origin.x + direction.x * radius, 0.0f, origin.z + direction.z * radius},
             0.0f,
             germinationDistribution(randomGenerator),
@@ -153,11 +156,11 @@ void World::SpawnSeeds(const glm::vec3& origin, unsigned int count, Organism& pa
     }
 }
 
-unsigned int World::SimulateSeeds(float dtYears)
+void World::SimulatePropagules(float dtYears, unsigned int& established, unsigned int& failed)
 {
-    for (Seed& seed : seeds)
+    for (Propagule& propagule : propagules)
     {
-        seed.age += dtYears;
+        propagule.age += dtYears;
     }
 
     struct Germination
@@ -166,22 +169,31 @@ unsigned int World::SimulateSeeds(float dtYears)
         Organism::Genome genome;
     };
 
+    std::uniform_real_distribution<double> establishmentChance(0.0, 1.0);
     std::vector<Germination> germinations;
-    seeds.erase(std::remove_if(seeds.begin(), seeds.end(), [&](const Seed& seed)
+    propagules.erase(std::remove_if(propagules.begin(), propagules.end(), [&](const Propagule& propagule)
     {
-        if (seed.age < seed.germinationTime || seed.position.y > 0.0f)
+        if (propagule.age < propagule.establishmentTime || propagule.position.y > 0.0f)
             return false;
 
-        germinations.push_back({seed.position, seed.genome});
+        if (establishmentChance(randomGenerator) <= propagule.genome.propaguleEstablishmentProbability)
+        {
+            germinations.push_back({propagule.position, propagule.genome});
+            established++;
+        }
+        else
+        {
+            failed++;
+        }
+
         return true;
-    }), seeds.end());
+    }), propagules.end());
 
     for (const Germination& germination : germinations)
     {
         MakeOrganism(germination.position, glm::identity<glm::quat>(), germination.genome);
     }
 
-    return static_cast<unsigned int>(germinations.size());
 }
 
 void World::AccumulateStats(Organism::Stats& totals, const Organism::Stats& stats)
@@ -206,8 +218,9 @@ void World::PrintProfilingSummary(
     unsigned int organismsAfter,
     unsigned int deaths,
     unsigned int coreFractureDeaths,
-    unsigned int seedsSpawned,
-    unsigned int seedsGerminated,
+    unsigned int propagulesSpawned,
+    unsigned int propagulesEstablished,
+    unsigned int propagulesFailed,
     unsigned int profileSamples,
     const Organism::Stats& totals,
     float maxHeight)
@@ -221,9 +234,10 @@ void World::PrintProfilingSummary(
         << std::fixed << std::setprecision(3)
         << "[profile year=" << timeYears << "]"
         << " trees " << organismsBefore << "->" << organismsAfter
-        << " seeds=" << seeds.size()
-        << " spawned=" << seedsSpawned
-        << " germinated=" << seedsGerminated
+        << " propagules=" << propagules.size()
+        << " spawned=" << propagulesSpawned
+        << " established=" << propagulesEstablished
+        << " failed=" << propagulesFailed
         << " deaths=" << deaths
         << " coreBreaks=" << coreFractureDeaths
         << " limbs=" << totals.limbCount

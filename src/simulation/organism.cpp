@@ -349,6 +349,7 @@ Organism::Genome Organism::MakeMutatedGenome(std::mt19937& randomGenerator) cons
     mutated.initialRadius = mutateFloat(mutated.initialRadius, 0.001f, 0.03f);
     mutated.minReproductionAgeYears = mutateFloat(mutated.minReproductionAgeYears, 0.5f, 50.0f);
     mutated.minReproductionHeightM = mutateFloat(mutated.minReproductionHeightM, 0.1f, 30.0f);
+    mutated.propaguleEstablishmentProbability = std::clamp(mutateDouble(mutated.propaguleEstablishmentProbability), 0.001, 0.95);
 
     const double seedCount = std::clamp(mutateDouble(static_cast<double>(mutated.seedsPerReproduction)), 1.0, 20.0);
     mutated.seedsPerReproduction = static_cast<unsigned int>(std::round(seedCount));

@@ -138,6 +138,22 @@ ecological point that seed production depends on tree size and resources; Smith
 et al. report larger DBH as a consistent predictor of acorn production and note
 trade-offs between growth and reproduction.
 
+Propagule model
+---------------
+The simulation uses "propagule" as the general reproductive dispersal unit.
+A seed is a high-reserve propagule with protective/provisioning tissues. A spore
+can be represented by the same model with much lower reserve energy, lower parent
+cost, many more propagules per event, wider dispersal, and lower establishment
+probability.
+
+Current default is seed-like:
+PropaguleEstablishmentProbability = 0.35.
+
+When a propagule reaches its establishment time, it is removed from the pending
+pool. It either becomes a new organism or fails to establish. This represents
+non-viable seed/spore losses, unsuitable microsites, drying, predation, disease,
+and other early establishment failures.
+
 Root uptake
 -----------
 Value used: RootSupportedLeafAreaPerRootArea = 20.
@@ -169,8 +185,9 @@ Major known simplifications
 3. Branch strength ignores taper, knots, reaction wood, branch collars, and wind.
 4. The torque model uses static gravity only; no dynamic loads or self-collision.
 5. Energy is a single organism-wide pool, not local carbohydrate transport.
-6. Seeds germinate anywhere on the ground; there is no soil, shade competition,
-   dormancy, predation, or establishment mortality.
+6. Propagules establish anywhere on the ground; there is no soil, shade
+   competition, dormancy bank, predation, or microsite-specific establishment
+   model yet.
 7. Genetics are asexual only. There is no recombination, ploidy, developmental
    gene regulation, or speciation tracking yet.
 8. Reproduction is still simplified. There is no flowering, pollination,

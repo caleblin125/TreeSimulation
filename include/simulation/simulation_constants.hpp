@@ -39,10 +39,11 @@ namespace SimulationConstants
     constexpr double MinReproductionReserveJ = 150000.0;
     constexpr float MinReproductionAgeYears = 5.0f;
     constexpr float MinReproductionHeightM = 1.0f;
+    constexpr double PropaguleEstablishmentProbability = 0.35;
     constexpr double FractureEnergyLossPerNewton = 5.0;
     constexpr double OrganismDeathEnergyJ = 0.0;
 
-    // Seed dispersal.
+    // Propagule dispersal. The defaults describe seed-like propagules.
     constexpr float ReproductionAttemptsPerYear = 0.35f;
     constexpr unsigned int SeedsPerReproduction = 3;
     constexpr float SeedMinDispersalRadiusM = 0.5f;
