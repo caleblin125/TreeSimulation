@@ -27,7 +27,6 @@ private:
     struct Seed
     {
         glm::vec3 position;
-        glm::vec3 velocity;
         float age;
         float germinationTime;
         Organism::Genome genome;
@@ -46,8 +45,8 @@ private:
         float maxHeight);
 
     unsigned int ids = 0;
-    float time = 0;
-    float nextProfilingPrint = SimulationConstants::ProfilingPrintIntervalSeconds;
+    float timeYears = 0.0f;
+    float nextProfilingPrint = SimulationConstants::ProfilingPrintIntervalYears;
     std::mt19937 randomGenerator;
     std::vector<std::unique_ptr<Organism>> organisms;
     std::vector<Seed> seeds;

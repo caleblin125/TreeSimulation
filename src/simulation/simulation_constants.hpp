@@ -4,8 +4,11 @@ namespace SimulationConstants
 {
     constexpr double Pi = 3.14159265358979323846;
 
-    // The simulation advances plant physiology faster than wall-clock seconds.
-    constexpr double BiologicalSecondsPerSimulationSecond = 86400.0;
+    // Ecological time. World::Simulate receives years.
+    constexpr double SecondsPerYear = 365.25 * 24.0 * 60.0 * 60.0;
+    constexpr float YearsPerMonth = 1.0f / 12.0f;
+    constexpr float DefaultTimeStepYears = YearsPerMonth;
+    constexpr double ActivePhotosynthesisFractionOfYear = 0.45;
 
     // Mechanical properties, SI units.
     constexpr double GravityMps2 = 9.81;
@@ -23,7 +26,7 @@ namespace SimulationConstants
 
     // Growth/reproduction tuning, SI-ish but still simplified by the current tree model.
     constexpr double WoodConstructionEnergyJPerKg = 17.0e6;
-    constexpr double MaxBranchElongationMetersPerBiologicalSecond = 2.0 / (365.0 * 24.0 * 60.0 * 60.0);
+    constexpr double MaxBranchElongationMetersPerYear = 0.6;
     constexpr double AverageTreeSeedDryMassKg = 0.000488;
     constexpr double SeedReserveEnergyDensityJPerKg = 20.0e6;
     constexpr double InitialEnergyJ = AverageTreeSeedDryMassKg * SeedReserveEnergyDensityJPerKg;
@@ -33,15 +36,12 @@ namespace SimulationConstants
     constexpr double OrganismDeathEnergyJ = 0.0;
 
     // Seed dispersal.
-    constexpr float ReproductionAttemptsPerSimulationSecond = 0.08f;
+    constexpr float ReproductionAttemptsPerYear = 0.8f;
     constexpr unsigned int SeedsPerReproduction = 5;
-    constexpr float SeedMinHorizontalSpeedMps = 1.5f;
-    constexpr float SeedMaxHorizontalSpeedMps = 9.0f;
-    constexpr float SeedMinUpwardSpeedMps = 1.0f;
-    constexpr float SeedMaxUpwardSpeedMps = 4.0f;
-    constexpr float SeedMinGerminationTimeSeconds = 1.0f;
-    constexpr float SeedMaxGerminationTimeSeconds = 5.0f;
-    constexpr float SeedGroundDragPerSecond = 0.65f;
+    constexpr float SeedMinDispersalRadiusM = 0.5f;
+    constexpr float SeedMaxDispersalRadiusM = 8.0f;
+    constexpr float SeedMinGerminationYears = 0.08f;
+    constexpr float SeedMaxGerminationYears = 1.0f;
 
     // Seedling/root geometry and below-ground resource uptake.
     constexpr float InitialShootLengthM = 0.08f;
@@ -56,5 +56,5 @@ namespace SimulationConstants
 
     // Profiling/debug output.
     constexpr bool EnableSimulationProfiling = true;
-    constexpr float ProfilingPrintIntervalSeconds = 1.0f;
+    constexpr float ProfilingPrintIntervalYears = 1.0f;
 }

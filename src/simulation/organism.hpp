@@ -21,8 +21,8 @@ class Organism{
 
         struct Genome
         {
-            double shootGrowthRate = SimulationConstants::MaxBranchElongationMetersPerBiologicalSecond;
-            double rootGrowthRate = SimulationConstants::MaxBranchElongationMetersPerBiologicalSecond;
+            double shootGrowthRate = SimulationConstants::MaxBranchElongationMetersPerYear;
+            double rootGrowthRate = SimulationConstants::MaxBranchElongationMetersPerYear;
             double leafAreaMultiplier = SimulationConstants::LeafAreaPerBranchSurfaceArea;
             double rootSupportedLeafArea = SimulationConstants::RootSupportedLeafAreaPerRootArea;
             double woodDensity = SimulationConstants::BranchWoodDensityKgPerM3;

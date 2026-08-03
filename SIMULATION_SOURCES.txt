@@ -4,9 +4,10 @@ Simulation constants research notes
 Units and time
 --------------
 The simulation now keeps mechanical quantities in SI-like units: meters, kilograms,
-newtons, joules, pascals, and seconds. Plant physiology is accelerated with
-BiologicalSecondsPerSimulationSecond = 86400, so one simulation second is treated
-as one biological day for photosynthesis, respiration, and growth.
+newtons, joules, pascals, and seconds. The world simulation advances in years,
+with the default visual step set to one month. Photosynthesis and respiration use
+SecondsPerYear and ActivePhotosynthesisFractionOfYear to convert year-sized steps
+back to active physiological seconds.
 
 Wood density
 ------------

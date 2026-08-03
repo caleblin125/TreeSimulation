@@ -7,7 +7,7 @@
 #include <iomanip>
 
 World::World() : ids(0),
-                 time(0.0f),
+                 timeYears(0.0f),
                  randomGenerator(std::random_device{}())
 {
     return;
@@ -23,9 +23,9 @@ void World::MakeOrganism(glm::vec3 root, glm::quat orientation, Organism::Genome
     organisms.push_back(std::make_unique<Organism>(ids++, root, orientation, genome));
 }
 
-void World::Simulate(float dt)
+void World::Simulate(float dtYears)
 {
-    time += dt;
+    timeYears += dtYears;
 
     std::uniform_real_distribution<float> reproductionChance(0.0f, 1.0f);
     const unsigned int organismsBefore = static_cast<unsigned int>(organisms.size());
@@ -37,7 +37,7 @@ void World::Simulate(float dt)
 
     for (auto &o : organisms)
     {
-        bool alive = o->Simulate(dt);
+        bool alive = o->Simulate(dtYears);
         const Organism::Stats& stats = o->GetLastStats();
         totals.limbCount += stats.limbCount;
         totals.energyStart += stats.energyStart;
@@ -65,7 +65,7 @@ void World::Simulate(float dt)
         }
 
         const Organism::Genome& genome = o->GetGenome();
-        if (reproductionChance(randomGenerator) < SimulationConstants::ReproductionAttemptsPerSimulationSecond * dt &&
+        if (reproductionChance(randomGenerator) < SimulationConstants::ReproductionAttemptsPerYear * dtYears &&
             o->TryReproduce(genome.seedEnergyCost))
         {
             SpawnSeeds(o->GetSeedOrigin(), genome.seedsPerReproduction, *o);
@@ -76,9 +76,9 @@ void World::Simulate(float dt)
                                    { return !p; }),
                     organisms.end());
 
-    const unsigned int seedsGerminated = SimulateSeeds(dt);
+    const unsigned int seedsGerminated = SimulateSeeds(dtYears);
 
-    if (SimulationConstants::EnableSimulationProfiling && time >= nextProfilingPrint)
+    if (SimulationConstants::EnableSimulationProfiling && timeYears >= nextProfilingPrint)
     {
         PrintProfilingSummary(
             organismsBefore,
@@ -90,8 +90,8 @@ void World::Simulate(float dt)
             totals,
             maxHeight);
 
-        while (time >= nextProfilingPrint)
-            nextProfilingPrint += SimulationConstants::ProfilingPrintIntervalSeconds;
+        while (timeYears >= nextProfilingPrint)
+            nextProfilingPrint += SimulationConstants::ProfilingPrintIntervalYears;
     }
 }
 
@@ -122,20 +122,18 @@ std::vector<Organism::BoundingBox> World::GetBoundingBoxes()
 void World::SpawnSeeds(const glm::vec3& origin, unsigned int count, Organism& parent)
 {
     std::uniform_real_distribution<float> angleDistribution(0.0f, 2.0f * static_cast<float>(SimulationConstants::Pi));
-    std::uniform_real_distribution<float> speedDistribution(SimulationConstants::SeedMinHorizontalSpeedMps, SimulationConstants::SeedMaxHorizontalSpeedMps);
-    std::uniform_real_distribution<float> upwardDistribution(SimulationConstants::SeedMinUpwardSpeedMps, SimulationConstants::SeedMaxUpwardSpeedMps);
-    std::uniform_real_distribution<float> germinationDistribution(SimulationConstants::SeedMinGerminationTimeSeconds, SimulationConstants::SeedMaxGerminationTimeSeconds);
+    std::uniform_real_distribution<float> radiusDistribution(SimulationConstants::SeedMinDispersalRadiusM, SimulationConstants::SeedMaxDispersalRadiusM);
+    std::uniform_real_distribution<float> germinationDistribution(SimulationConstants::SeedMinGerminationYears, SimulationConstants::SeedMaxGerminationYears);
 
     seeds.reserve(seeds.size() + count);
     for (unsigned int i = 0; i < count; ++i)
     {
         const float angle = angleDistribution(randomGenerator);
-        const float speed = speedDistribution(randomGenerator);
+        const float radius = radiusDistribution(randomGenerator);
         const glm::vec3 direction(std::cos(angle), 0.0f, std::sin(angle));
 
         seeds.push_back({
-            origin,
-            direction * speed + glm::vec3(0.0f, upwardDistribution(randomGenerator), 0.0f),
+            {origin.x + direction.x * radius, 0.0f, origin.z + direction.z * radius},
             0.0f,
             germinationDistribution(randomGenerator),
             parent.MakeMutatedGenome(randomGenerator)
@@ -143,21 +141,11 @@ void World::SpawnSeeds(const glm::vec3& origin, unsigned int count, Organism& pa
     }
 }
 
-unsigned int World::SimulateSeeds(float dt)
+unsigned int World::SimulateSeeds(float dtYears)
 {
     for (Seed& seed : seeds)
     {
-        seed.age += dt;
-        seed.velocity.y -= static_cast<float>(SimulationConstants::GravityMps2) * dt;
-        seed.position += seed.velocity * dt;
-
-        if (seed.position.y <= 0.0f)
-        {
-            seed.position.y = 0.0f;
-            seed.velocity.y = 0.0f;
-            seed.velocity.x *= std::max(0.0f, 1.0f - SimulationConstants::SeedGroundDragPerSecond * dt);
-            seed.velocity.z *= std::max(0.0f, 1.0f - SimulationConstants::SeedGroundDragPerSecond * dt);
-        }
+        seed.age += dtYears;
     }
 
     struct Germination
@@ -201,7 +189,7 @@ void World::PrintProfilingSummary(
 
     std::cout
         << std::fixed << std::setprecision(3)
-        << "[profile t=" << time << "s]"
+        << "[profile year=" << timeYears << "]"
         << " trees " << organismsBefore << "->" << organismsAfter
         << " seeds=" << seeds.size()
         << " spawned=" << seedsSpawned

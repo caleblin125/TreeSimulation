@@ -57,7 +57,7 @@ Organism::Organism(unsigned int id, glm::vec3 root, glm::quat orientation, Genom
     return;
 };
 
-bool Organism::Simulate(float dt)
+bool Organism::Simulate(float dtYears)
 {
     lastStats = {};
     lastStats.id = id;
@@ -99,12 +99,12 @@ bool Organism::Simulate(float dt)
     lastStats.leafArea = leafArea;
     lastStats.resourceFactor = resourceFactor;
 
-    const double biologicalDt = dt * SimulationConstants::BiologicalSecondsPerSimulationSecond;
+    const double activeSeconds = dtYears * SimulationConstants::SecondsPerYear * SimulationConstants::ActivePhotosynthesisFractionOfYear;
     for (const LimbLight& lit : limbLight)
     {
         const double branchSurfaceArea = BranchLateralArea(lit.limb->radius, lit.limb->length);
         const double leafArea = branchSurfaceArea * genome.leafAreaMultiplier;
-        const double fixedCo2 = SimulationConstants::MaxLeafAssimilationMolCo2PerM2Second * leafArea * lit.exposure * resourceFactor * biologicalDt;
+        const double fixedCo2 = SimulationConstants::MaxLeafAssimilationMolCo2PerM2Second * leafArea * lit.exposure * resourceFactor * activeSeconds;
         const double gainedEnergy = fixedCo2 * SimulationConstants::EnergyJPerMolCo2Fixed;
         energy += gainedEnergy;
         lastStats.photosynthesisEnergy += gainedEnergy;
@@ -113,7 +113,7 @@ bool Organism::Simulate(float dt)
     for (const auto& limb : limbs)
     {
         const double branchSurfaceArea = BranchLateralArea(limb->radius, limb->length);
-        const double respiredCo2 = SimulationConstants::WoodyRespirationMolCo2PerM2Second * branchSurfaceArea * biologicalDt;
+        const double respiredCo2 = SimulationConstants::WoodyRespirationMolCo2PerM2Second * branchSurfaceArea * activeSeconds;
         const double respirationEnergy = respiredCo2 * SimulationConstants::EnergyJPerMolCo2Fixed;
         energy -= respirationEnergy;
         lastStats.respirationEnergy += respirationEnergy;
@@ -127,24 +127,42 @@ bool Organism::Simulate(float dt)
     for (const LimbLight& lit : limbLight)
     {
         const double oldVolume = CylinderVolume(lit.limb->radius, lit.limb->length);
-        const float growth = static_cast<float>(genome.shootGrowthRate * (0.25 + 0.75 * lit.exposure) * biologicalDt);
+        float growth = static_cast<float>(genome.shootGrowthRate * (0.25 + 0.75 * lit.exposure) * dtYears);
         const float newLength = lit.limb->length + growth;
         const float newRadius = std::max(genome.initialRadius, static_cast<float>(newLength * genome.limbRadiusRatio));
         const double newVolume = CylinderVolume(newRadius, newLength);
         const double addedMass = std::max(0.0, newVolume - oldVolume) * genome.woodDensity;
         const double growthCost = addedMass * SimulationConstants::WoodConstructionEnergyJPerKg;
 
-        if (energy < growthCost || growth <= 0.0f)
+        if (growth <= 0.0f)
             continue;
 
-        lit.limb->length = newLength;
-        lit.limb->radius = newRadius;
-        energy -= growthCost;
-        lastStats.shootGrowthCost += growthCost;
+        if (energy < growthCost)
+        {
+            const double affordableMass = std::max(0.0, energy * 0.75) / SimulationConstants::WoodConstructionEnergyJPerKg;
+            const double affordableVolume = affordableMass / genome.woodDensity;
+            const double desiredAddedVolume = newVolume - oldVolume;
+            const double growthScale = desiredAddedVolume <= 0.0 ? 0.0 : std::clamp(affordableVolume / desiredAddedVolume, 0.0, 1.0);
+            growth *= static_cast<float>(growthScale);
+        }
+
+        if (growth <= 0.00001f)
+            continue;
+
+        const float affordableLength = lit.limb->length + growth;
+        const float affordableRadius = std::max(genome.initialRadius, static_cast<float>(affordableLength * genome.limbRadiusRatio));
+        const double affordableVolume = CylinderVolume(affordableRadius, affordableLength);
+        const double affordableAddedMass = std::max(0.0, affordableVolume - oldVolume) * genome.woodDensity;
+        const double affordableGrowthCost = affordableAddedMass * SimulationConstants::WoodConstructionEnergyJPerKg;
+
+        lit.limb->length = affordableLength;
+        lit.limb->radius = affordableRadius;
+        energy -= affordableGrowthCost;
+        lastStats.shootGrowthCost += affordableGrowthCost;
         lastStats.shootGrowthLength += growth;
     }
 
-    const double rootGrowth = genome.rootGrowthRate * biologicalDt * (1.0 - resourceFactor);
+    double rootGrowth = genome.rootGrowthRate * dtYears * (1.0 - resourceFactor);
     if (rootGrowth > 0.0)
     {
         const double oldVolume = CylinderVolume(rootSystem->radius, rootSystem->length);
@@ -154,12 +172,27 @@ bool Organism::Simulate(float dt)
         const double addedMass = std::max(0.0, newVolume - oldVolume) * genome.woodDensity;
         const double growthCost = addedMass * SimulationConstants::WoodConstructionEnergyJPerKg;
 
-        if (energy >= growthCost)
+        if (energy < growthCost)
         {
-            rootSystem->length = newLength;
-            rootSystem->radius = newRadius;
-            energy -= growthCost;
-            lastStats.rootGrowthCost += growthCost;
+            const double affordableMass = std::max(0.0, energy * 0.75) / SimulationConstants::WoodConstructionEnergyJPerKg;
+            const double affordableVolume = affordableMass / genome.woodDensity;
+            const double desiredAddedVolume = newVolume - oldVolume;
+            const double growthScale = desiredAddedVolume <= 0.0 ? 0.0 : std::clamp(affordableVolume / desiredAddedVolume, 0.0, 1.0);
+            rootGrowth *= growthScale;
+        }
+
+        if (rootGrowth > 0.00001)
+        {
+            const float affordableLength = rootSystem->length + static_cast<float>(rootGrowth);
+            const float affordableRadius = std::max(genome.initialRadius, static_cast<float>(affordableLength * genome.rootRadiusRatio));
+            const double affordableVolume = CylinderVolume(affordableRadius, affordableLength);
+            const double affordableAddedMass = std::max(0.0, affordableVolume - oldVolume) * genome.woodDensity;
+            const double affordableGrowthCost = affordableAddedMass * SimulationConstants::WoodConstructionEnergyJPerKg;
+
+            rootSystem->length = affordableLength;
+            rootSystem->radius = affordableRadius;
+            energy -= affordableGrowthCost;
+            lastStats.rootGrowthCost += affordableGrowthCost;
             lastStats.rootGrowthLength += static_cast<float>(rootGrowth);
         }
     }

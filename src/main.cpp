@@ -1,5 +1,6 @@
 #include <iostream>
 #include <random>
+#include "simulation/simulation_constants.hpp"
 #include "simulation/world.hpp"
 #include "renderer/renderer.hpp"
 
@@ -23,7 +24,7 @@ int main()
     }
     
     while (renderer.Update()){
-        world.Simulate(0.02f);
+        world.Simulate(SimulationConstants::DefaultTimeStepYears);
 
         auto limbs = world.GetLimbs();
         for(auto& limb : limbs){
