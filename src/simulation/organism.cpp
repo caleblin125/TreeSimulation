@@ -76,6 +76,7 @@ bool Organism::Simulate(float dtYears)
     lastStats.rootSurfaceArea = rootSurfaceArea;
     lastStats.leafArea = leafArea;
     lastStats.resourceFactor = resourceFactor;
+    std::vector<LimbDecision> limbDecisions = EvaluateGrowthBrains(limbs, limbLight);
 
     const double activeSeconds = dtYears * SimulationConstants::SecondsPerYear * SimulationConstants::ActivePhotosynthesisFractionOfYear;
     for (const LimbLight& lit : limbLight)
@@ -97,17 +98,21 @@ bool Organism::Simulate(float dtYears)
         lastStats.respirationEnergy += respirationEnergy;
     }
 
-    std::sort(limbLight.begin(), limbLight.end(), [](const LimbLight& a, const LimbLight& b)
+    std::sort(limbDecisions.begin(), limbDecisions.end(), [](const LimbDecision& a, const LimbDecision& b)
     {
-        return a.exposure > b.exposure;
+        return a.brain.elongation > b.brain.elongation;
     });
 
-    for (const LimbLight& lit : limbLight)
+    for (const LimbDecision& decision : limbDecisions)
     {
-        const double oldVolume = Geometry::CylinderVolume(lit.limb->radius, lit.limb->length);
-        float growth = static_cast<float>(genome.shootGrowthRate * (0.25 + 0.75 * lit.exposure) * dtYears);
-        const float newLength = lit.limb->length + growth;
-        const float newRadius = std::max(genome.initialRadius, static_cast<float>(newLength * genome.limbRadiusRatio));
+        if (decision.limb->isRoot)
+            continue;
+
+        const double oldVolume = Geometry::CylinderVolume(decision.limb->radius, decision.limb->length);
+        float growth = static_cast<float>(genome.shootGrowthRate * decision.brain.elongation * dtYears);
+        const float newLength = decision.limb->length + growth;
+        const double radiusRatio = genome.limbRadiusRatio * (0.45 + 1.25 * decision.brain.thickening);
+        const float newRadius = std::max(genome.initialRadius, static_cast<float>(newLength * radiusRatio));
         const double newVolume = Geometry::CylinderVolume(newRadius, newLength);
         const double addedMass = std::max(0.0, newVolume - oldVolume) * genome.woodDensity;
         const double growthCost = addedMass * SimulationConstants::WoodConstructionEnergyJPerKg;
@@ -127,27 +132,34 @@ bool Organism::Simulate(float dtYears)
         if (growth <= 0.00001f)
             continue;
 
-        const float affordableLength = lit.limb->length + growth;
-        const float affordableRadius = std::max(genome.initialRadius, static_cast<float>(affordableLength * genome.limbRadiusRatio));
+        const float affordableLength = decision.limb->length + growth;
+        const float affordableRadius = std::max(genome.initialRadius, static_cast<float>(affordableLength * radiusRatio));
         const double affordableVolume = Geometry::CylinderVolume(affordableRadius, affordableLength);
         const double affordableAddedMass = std::max(0.0, affordableVolume - oldVolume) * genome.woodDensity;
         const double affordableGrowthCost = affordableAddedMass * SimulationConstants::WoodConstructionEnergyJPerKg;
 
-        lit.limb->length = affordableLength;
-        lit.limb->radius = affordableRadius;
+        decision.limb->length = affordableLength;
+        decision.limb->radius = affordableRadius;
         energy -= affordableGrowthCost;
         lastStats.shootGrowthCost += affordableGrowthCost;
         lastStats.shootGrowthLength += growth;
     }
 
-    const double rootGrowthDemand = SimulationConstants::BaselineRootGrowthFraction +
-        (1.0 - SimulationConstants::BaselineRootGrowthFraction) * (1.0 - resourceFactor);
-    double rootGrowth = genome.rootGrowthRate * dtYears * rootGrowthDemand;
-    if (rootGrowth > 0.0)
+    for (const LimbDecision& decision : limbDecisions)
     {
-        const double oldVolume = Geometry::CylinderVolume(rootSystem->radius, rootSystem->length);
-        const float newLength = rootSystem->length + static_cast<float>(rootGrowth);
-        const float newRadius = std::max(genome.initialRadius, static_cast<float>(newLength * genome.rootRadiusRatio));
+        if (!decision.limb->isRoot)
+            continue;
+
+        const double rootGrowthDemand = SimulationConstants::BaselineRootGrowthFraction +
+            (1.0 - SimulationConstants::BaselineRootGrowthFraction) * decision.brain.rootGrowth;
+        double rootGrowth = genome.rootGrowthRate * dtYears * rootGrowthDemand;
+        if (rootGrowth <= 0.0)
+            continue;
+
+        const double oldVolume = Geometry::CylinderVolume(decision.limb->radius, decision.limb->length);
+        const float newLength = decision.limb->length + static_cast<float>(rootGrowth);
+        const double radiusRatio = genome.rootRadiusRatio * (0.45 + 1.25 * decision.brain.thickening);
+        const float newRadius = std::max(genome.initialRadius, static_cast<float>(newLength * radiusRatio));
         const double newVolume = Geometry::CylinderVolume(newRadius, newLength);
         const double addedMass = std::max(0.0, newVolume - oldVolume) * genome.woodDensity;
         const double growthCost = addedMass * SimulationConstants::WoodConstructionEnergyJPerKg;
@@ -163,26 +175,36 @@ bool Organism::Simulate(float dtYears)
 
         if (rootGrowth > 0.00001)
         {
-            const float affordableLength = rootSystem->length + static_cast<float>(rootGrowth);
-            const float affordableRadius = std::max(genome.initialRadius, static_cast<float>(affordableLength * genome.rootRadiusRatio));
+            const float affordableLength = decision.limb->length + static_cast<float>(rootGrowth);
+            const float affordableRadius = std::max(genome.initialRadius, static_cast<float>(affordableLength * radiusRatio));
             const double affordableVolume = Geometry::CylinderVolume(affordableRadius, affordableLength);
             const double affordableAddedMass = std::max(0.0, affordableVolume - oldVolume) * genome.woodDensity;
             const double affordableGrowthCost = affordableAddedMass * SimulationConstants::WoodConstructionEnergyJPerKg;
 
-            rootSystem->length = affordableLength;
-            rootSystem->radius = affordableRadius;
+            decision.limb->length = affordableLength;
+            decision.limb->radius = affordableRadius;
             energy -= affordableGrowthCost;
             lastStats.rootGrowthCost += affordableGrowthCost;
             lastStats.rootGrowthLength += static_cast<float>(rootGrowth);
         }
     }
 
-    auto branchParent = std::find_if(limbLight.begin(), limbLight.end(), [](const LimbLight& lit)
+    for (const LimbDecision& decision : limbDecisions)
     {
-        return !lit.limb->isRoot && lit.limb->length > 0.5f && lit.limb->children.empty();
+        lastStats.reproductionPressure = std::max(lastStats.reproductionPressure, decision.brain.reproduce);
+        if (decision.brain.split >= SimulationConstants::BranchSplitSignalThreshold)
+            lastStats.splitSignals++;
+    }
+
+    auto branchParent = std::find_if(limbDecisions.begin(), limbDecisions.end(), [](const LimbDecision& decision)
+    {
+        return !decision.limb->isRoot &&
+            decision.limb->length > 0.5f &&
+            decision.limb->children.empty() &&
+            decision.brain.split >= SimulationConstants::BranchSplitSignalThreshold;
     });
 
-    if (energy > genome.branchSpawnEnergy && branchParent != limbLight.end())
+    if (energy > genome.branchSpawnEnergy && branchParent != limbDecisions.end())
     {
         std::shared_ptr<Limb> parent = branchParent->limb;
 
@@ -202,7 +224,6 @@ bool Organism::Simulate(float dtYears)
         parent->Spawn(genome.childAttachment, rotation, genome.initialShootLength, genome.initialRadius);
 
         energy -= genome.branchSpawnEnergy;
-        printf("Organism %u spawning, energy %.4f limbs %zu\n", id, energy, limbs.size() + 3);
     }
 
     UpdateLimbPoses(core);
@@ -337,7 +358,7 @@ Organism::Genome Organism::MakeMutatedGenome(std::mt19937& randomGenerator) cons
     mutated.bendingStrength = std::clamp(mutateDouble(mutated.bendingStrength), 5.0e6, 200.0e6);
     mutated.limbRadiusRatio = std::clamp(mutateDouble(mutated.limbRadiusRatio), 0.01, 0.2);
     mutated.rootRadiusRatio = std::clamp(mutateDouble(mutated.rootRadiusRatio), 0.005, 0.12);
-    mutated.branchSpawnEnergy = std::clamp(mutateDouble(mutated.branchSpawnEnergy), 1000.0, 5.0e6);
+    mutated.branchSpawnEnergy = std::clamp(mutateDouble(mutated.branchSpawnEnergy), 1000.0, 5.0e9);
     mutated.seedEnergyCost = std::clamp(mutateDouble(mutated.seedEnergyCost), SimulationConstants::InitialEnergyJ, 2.0e6);
     mutated.reproductionOverhead = std::clamp(mutateDouble(mutated.reproductionOverhead), 0.0, 1.0e6);
     mutated.maxAnnualReproductiveAllocation = std::clamp(mutateDouble(mutated.maxAnnualReproductiveAllocation), 0.02, 0.60);
@@ -355,6 +376,8 @@ Organism::Genome Organism::MakeMutatedGenome(std::mt19937& randomGenerator) cons
 
     const double seedCount = std::clamp(mutateDouble(static_cast<double>(mutated.seedsPerReproduction)), 1.0, 20.0);
     mutated.seedsPerReproduction = static_cast<unsigned int>(std::round(seedCount));
+    for (double& weight : mutated.growthBrainWeights)
+        weight = std::clamp(weight + mutation(randomGenerator), -6.0, 6.0);
 
     return mutated;
 }
@@ -450,6 +473,77 @@ std::vector<Organism::LimbLight> Organism::CalculateSunlight(const std::vector<s
             ret.push_back({limb, SunExposure(limb, limbs)});
     }
     return ret;
+}
+
+std::vector<Organism::LimbDecision> Organism::EvaluateGrowthBrains(const std::vector<std::shared_ptr<Limb>>& limbs, const std::vector<LimbLight>& limbLight) const
+{
+    std::vector<LimbDecision> decisions;
+    decisions.reserve(limbs.size());
+
+    for (const auto& limb : limbs)
+    {
+        double exposure = 0.0;
+        const auto lit = std::find_if(limbLight.begin(), limbLight.end(), [&](const LimbLight& candidate)
+        {
+            return candidate.limb == limb;
+        });
+        if (lit != limbLight.end())
+            exposure = lit->exposure;
+
+        decisions.push_back({limb, exposure, EvaluateGrowthBrain(limb, exposure)});
+    }
+
+    return decisions;
+}
+
+Organism::BrainOutput Organism::EvaluateGrowthBrain(const std::shared_ptr<Limb>& limb, double exposure) const
+{
+    const double strength = limb->radius <= 0.0f
+        ? 1.0
+        : Physics::BendingStrength(limb->radius, genome.bendingStrength);
+    const double torque = static_cast<double>(glm::length(limb->carriedTorque));
+    const double torqueMargin = strength <= 0.0 ? 1.0 : std::clamp(1.0 - torque / strength, 0.0, 1.0);
+    const double normalizedEnergy = std::clamp(energy / std::max(genome.minReproductionReserve, SimulationConstants::InitialEnergyJ), 0.0, 1.0);
+    const double normalizedLength = std::clamp(static_cast<double>(limb->length) / std::max(0.1, static_cast<double>(genome.minReproductionHeightM)), 0.0, 1.0);
+    const double normalizedAge = std::clamp(static_cast<double>(ageYears) / std::max(0.1f, genome.minReproductionAgeYears), 0.0, 1.0);
+    const double normalizedHeight = std::clamp(static_cast<double>(lastStats.maxHeight) / std::max(0.1f, genome.minReproductionHeightM), 0.0, 1.0);
+
+    const std::array<double, GrowthBrainInputCount> inputs = {
+        normalizedEnergy,
+        lastStats.resourceFactor,
+        std::clamp(exposure, 0.0, 1.0),
+        limb->isRoot ? 1.0 : 0.0,
+        normalizedLength,
+        torqueMargin,
+        normalizedAge,
+        normalizedHeight
+    };
+
+    auto sigmoid = [](double value)
+    {
+        return 1.0 / (1.0 + std::exp(-value));
+    };
+
+    BrainOutput output;
+    double* fields[] = {
+        &output.elongation,
+        &output.thickening,
+        &output.rootGrowth,
+        &output.split,
+        &output.reproduce
+    };
+
+    for (std::size_t outputIndex = 0; outputIndex < GrowthBrainOutputCount; ++outputIndex)
+    {
+        const std::size_t weightOffset = outputIndex * (GrowthBrainInputCount + 1);
+        double activation = genome.growthBrainWeights[weightOffset];
+        for (std::size_t inputIndex = 0; inputIndex < GrowthBrainInputCount; ++inputIndex)
+            activation += genome.growthBrainWeights[weightOffset + inputIndex + 1] * inputs[inputIndex];
+
+        *fields[outputIndex] = sigmoid(activation);
+    }
+
+    return output;
 }
 
 double Organism::SunExposure(const std::shared_ptr<Limb>& limb, const std::vector<std::shared_ptr<Limb>>& limbs) const

@@ -111,7 +111,8 @@ void World::SimulateSubstep(
         }
 
         const Organism::Genome& genome = o->GetGenome();
-        if (reproductionChance(randomGenerator) < SimulationConstants::ReproductionAttemptsPerYear * dtYears &&
+        if (stats.reproductionPressure >= SimulationConstants::ReproductionSignalThreshold &&
+            reproductionChance(randomGenerator) < SimulationConstants::ReproductionAttemptsPerYear * dtYears * stats.reproductionPressure &&
             o->TryReproduce(genome.seedsPerReproduction, dtYears))
         {
             SpawnPropagules(o->GetSeedOrigin(), genome.seedsPerReproduction, *o);

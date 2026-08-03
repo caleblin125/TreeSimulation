@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <vector>
 #include <memory>
 #include <random>
@@ -15,6 +17,9 @@
 class Organism{
     public:
         using BoundingBox = Geometry::BoundingBox;
+        static constexpr std::size_t GrowthBrainInputCount = 8;
+        static constexpr std::size_t GrowthBrainOutputCount = 5;
+        static constexpr std::size_t GrowthBrainWeightCount = GrowthBrainOutputCount * (GrowthBrainInputCount + 1);
 
         struct Genome
         {
@@ -42,6 +47,13 @@ class Organism{
             float minReproductionHeightM = SimulationConstants::MinReproductionHeightM;
             double propaguleEstablishmentProbability = SimulationConstants::PropaguleEstablishmentProbability;
             unsigned int seedsPerReproduction = SimulationConstants::SeedsPerReproduction;
+            std::array<double, GrowthBrainWeightCount> growthBrainWeights = {
+                -0.20, 0.80, 0.15, 1.80, -1.20, -0.20, 0.40, -0.15, 0.10,
+                -0.65, 0.25, 0.10, 0.35, 0.15, 0.85, 1.80, 0.00, 0.20,
+                -0.70, 0.30, -1.35, 0.10, 2.20, -0.10, 0.20, 0.00, 0.00,
+                -2.80, 1.10, 0.25, 1.20, -3.00, 1.40, 0.40, 0.70, 0.65,
+                -2.60, 1.35, 0.35, 0.70, -1.50, 0.20, 0.25, 1.50, 0.90
+            };
         };
 
         struct Stats
@@ -62,6 +74,8 @@ class Organism{
             float rootGrowthLength = 0.0f;
             float maxHeight = 0.0f;
             float ageYears = 0.0f;
+            double reproductionPressure = 0.0;
+            unsigned int splitSignals = 0;
             bool diedFromCoreFracture = false;
             bool alive = true;
         };
@@ -88,12 +102,30 @@ class Organism{
             double exposure;
         };
 
+        struct BrainOutput
+        {
+            double elongation = 0.0;
+            double thickening = 0.0;
+            double rootGrowth = 0.0;
+            double split = 0.0;
+            double reproduce = 0.0;
+        };
+
+        struct LimbDecision
+        {
+            std::shared_ptr<Limb> limb;
+            double exposure = 0.0;
+            BrainOutput brain;
+        };
+
         std::vector<std::shared_ptr<Limb>> CollectLimbs();
         void UpdateLimbPoses(const std::shared_ptr<Limb>& limb);
         double UpdateBranchWeights(const std::shared_ptr<Limb>& limb);
         double PruneOverstressedBranches(const std::shared_ptr<Limb>& limb);
         bool ExceedsStrength(const std::shared_ptr<Limb>& limb) const;
         std::vector<LimbLight> CalculateSunlight(const std::vector<std::shared_ptr<Limb>>& limbs) const;
+        std::vector<LimbDecision> EvaluateGrowthBrains(const std::vector<std::shared_ptr<Limb>>& limbs, const std::vector<LimbLight>& limbLight) const;
+        BrainOutput EvaluateGrowthBrain(const std::shared_ptr<Limb>& limb, double exposure) const;
         double SunExposure(const std::shared_ptr<Limb>& limb, const std::vector<std::shared_ptr<Limb>>& limbs) const;
         bool RayHitsLimb(const glm::vec3& origin, const glm::vec3& direction, const std::shared_ptr<Limb>& blocker) const;
 

@@ -169,6 +169,30 @@ void TestDefaultProtoTreeSurvivesAsSimpleForm()
     Expect(organism.GetLastStats().rootGrowthLength > 0.0f, "default proto-tree keeps growing downward");
 }
 
+void TestLimbBrainControlsSplitAndReproduction()
+{
+    Organism::Genome genome;
+    genome.seedInitialEnergy = 10'000'000.0;
+    genome.initialShootLength = 0.75f;
+    genome.initialRootLength = 0.25f;
+    genome.initialRadius = 0.05f;
+    genome.branchSpawnEnergy = 1.0;
+    genome.minReproductionAgeYears = 0.0f;
+    genome.minReproductionHeightM = 0.1f;
+    genome.growthBrainWeights.fill(0.0);
+    genome.growthBrainWeights[3 * (Organism::GrowthBrainInputCount + 1)] = 8.0;
+    genome.growthBrainWeights[4 * (Organism::GrowthBrainInputCount + 1)] = 8.0;
+
+    Organism organism(8, glm::vec3(0.0f), glm::identity<glm::quat>(), genome);
+    const bool alive = organism.Simulate(SimulationConstants::DefaultTimeStepYears);
+    const std::vector<std::shared_ptr<Limb>> limbs = LockLimbs(organism.GetLimbs());
+
+    Expect(alive, "forced-brain organism survives one step");
+    Expect(limbs.size() > 2, "high split output creates child limbs");
+    Expect(organism.GetLastStats().splitSignals > 0, "split signal is recorded in stats");
+    Expect(organism.GetLastStats().reproductionPressure >= SimulationConstants::ReproductionSignalThreshold, "high reproduction output is recorded in stats");
+}
+
 void TestReproductionGates()
 {
     Organism seedling(3, glm::vec3(0.0f), glm::identity<glm::quat>());
@@ -179,7 +203,9 @@ void TestReproductionGates()
     fertile.Simulate(SimulationConstants::DefaultTimeStepYears);
     Expect(fertile.TryReproduce(3, 1.0), "fertile organism can afford a yearly reproduction event");
 
-    Organism capped(5, glm::vec3(0.0f), glm::identity<glm::quat>(), ReproductiveGenome());
+    Organism::Genome cappedGenome = ReproductiveGenome();
+    cappedGenome.maxAnnualReproductiveAllocation = 1.0e-9;
+    Organism capped(5, glm::vec3(0.0f), glm::identity<glm::quat>(), cappedGenome);
     capped.Simulate(SimulationConstants::DefaultTimeStepYears);
     Expect(!capped.TryReproduce(3, 0.0001), "annual reproductive allocation blocks too-fast spawning");
 }
@@ -229,6 +255,7 @@ int main()
     TestInitialRootAndBounds();
     TestMonthlyGrowth();
     TestDefaultProtoTreeSurvivesAsSimpleForm();
+    TestLimbBrainControlsSplitAndReproduction();
     TestReproductionGates();
     TestGenomeMutationClamps();
     TestPropaguleEstablishment();
