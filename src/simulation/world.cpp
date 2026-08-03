@@ -23,6 +23,21 @@ void World::MakeOrganism(glm::vec3 root, glm::quat orientation, Organism::Genome
     organisms.push_back(std::make_unique<Organism>(ids++, root, orientation, genome));
 }
 
+void World::AddPropagule(glm::vec3 position, Organism::Genome genome, float establishmentTime)
+{
+    propagules.push_back({position, 0.0f, establishmentTime, genome});
+}
+
+std::size_t World::GetOrganismCount() const
+{
+    return organisms.size();
+}
+
+std::size_t World::GetPropaguleCount() const
+{
+    return propagules.size();
+}
+
 void World::Simulate(float dtYears)
 {
     const unsigned int organismsBefore = static_cast<unsigned int>(organisms.size());

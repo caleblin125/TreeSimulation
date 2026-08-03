@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <memory>
 
 #include <random>
@@ -18,8 +19,11 @@ public:
 
     void MakeOrganism(glm::vec3 root, glm::quat orientation);
     void MakeOrganism(glm::vec3 root, glm::quat orientation, Organism::Genome genome);
+    void AddPropagule(glm::vec3 position, Organism::Genome genome, float establishmentTime);
     void Simulate(float dt);
 
+    std::size_t GetOrganismCount() const;
+    std::size_t GetPropaguleCount() const;
     std::vector<std::weak_ptr<Limb>> GetLimbs();
     std::vector<Organism::BoundingBox> GetBoundingBoxes();
 

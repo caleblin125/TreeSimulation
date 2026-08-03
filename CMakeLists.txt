@@ -67,3 +67,16 @@ target_link_libraries(TreeSim PRIVATE
     TreeSimCore
     TreeSimRenderer
 )
+
+enable_testing()
+
+add_executable(TreeSimTests
+    tests/simulation_tests.cpp
+)
+
+target_link_libraries(TreeSimTests PRIVATE
+    glm::glm
+    TreeSimCore
+)
+
+add_test(NAME TreeSimTests COMMAND TreeSimTests)
