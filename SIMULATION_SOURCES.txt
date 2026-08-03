@@ -97,8 +97,9 @@ Seed reserve energy
 -------------------
 Values used:
 AverageTreeSeedDryMassKg = 0.000488 kg.
-SeedReserveEnergyDensityJPerKg = 20 MJ/kg.
-InitialEnergyJ = about 9760 J.
+SeedReserveEnergyDensityJPerKg = 24 MJ/kg.
+InitialEnergyJ = about 11712 J.
+SeedProvisioningCostMultiplier = 4.
 
 Sources:
 Global Patterns in the Evolutionary Relations Between Seed Mass and Plant
@@ -108,15 +109,34 @@ https://pmc.ncbi.nlm.nih.gov/articles/PMC12158795/
 FAO, "Food energy - methods of analysis and conversion factors".
 https://www.fao.org/4/y5022e/y5022e04.htm
 
+Kager and Fietz, "Energy or information? The role of seed availability for
+reproductive decisions in edible dormice", Journal of Comparative Physiology B.
+https://link.springer.com/article/10.1007/s00360-009-0425-6
+
 JSTOR abstract, "Energy Values of Tree-Seeds Eaten by Small Mammals".
 https://www.jstor.org/stable/3543838
+
+Smith et al., "Individual-level variation in reproductive effort in chestnut oak
+and black oak", Forest Ecology and Management 508 (2022).
+https://research.fs.usda.gov/download/treesearch/69489.pdf
 
 Reasoning: The global tree-seed dataset reports most tree species between 0.1
 and 10,000 mg seed mass, with an average around 488 mg. FAO Atwater factors put
 carbohydrate/protein around 17 kJ/g and fat around 37 kJ/g. Tree-seed caloric
 values reported for whole seeds are about 4.4-6.8 kcal/g, or roughly
-18-28 kJ/g. The sim uses 20 kJ/g as a conservative mixed-reserve value:
-0.488 g * 20 kJ/g = 9.76 kJ = 9760 J.
+18-28 kJ/g. Kager and Fietz report beech seeds around 24.1 kJ/g. The sim
+uses 24 kJ/g:
+
+0.488 g * 24 kJ/g = 11.712 kJ = 11712 J.
+
+The parent pays more than the embryo reserve. SeedEnergyCostJ is now the seed
+reserve multiplied by SeedProvisioningCostMultiplier = 4, representing seed coat,
+fruit/flower/support tissue, failed ovules, dispersal structures, and respiratory
+costs of reproduction. Reproduction is also gated by age, height, minimum reserve
+energy, and a maximum annual reproductive allocation fraction. This follows the
+ecological point that seed production depends on tree size and resources; Smith
+et al. report larger DBH as a consistent predictor of acorn production and note
+trade-offs between growth and reproduction.
 
 Root uptake
 -----------
@@ -153,3 +173,5 @@ Major known simplifications
    dormancy, predation, or establishment mortality.
 7. Genetics are asexual only. There is no recombination, ploidy, developmental
    gene regulation, or speciation tracking yet.
+8. Reproduction is still simplified. There is no flowering, pollination,
+   self-incompatibility, masting synchrony, fruit abortion, or seed predation.

@@ -38,6 +38,8 @@ bool Organism::Simulate(float dtYears)
     lastStats = {};
     lastStats.id = id;
     lastStats.energyStart = energy;
+    ageYears += dtYears;
+    lastStats.ageYears = ageYears;
 
     if (!core || !rootSystem)
     {
@@ -276,12 +278,26 @@ glm::vec3 Organism::GetSeedOrigin()
     };
 }
 
-bool Organism::TryReproduce(double energyCost)
+bool Organism::TryReproduce(unsigned int seedCount, double dtYears)
 {
-    if (energy < energyCost)
+    if (ageYears < genome.minReproductionAgeYears)
         return false;
 
-    energy -= energyCost;
+    const Stats& stats = GetLastStats();
+    if (stats.maxHeight < genome.minReproductionHeightM)
+        return false;
+
+    const double eventCost = genome.reproductionOverhead + genome.seedEnergyCost * static_cast<double>(seedCount);
+    const double annualBudget = std::max(0.0, energy) * genome.maxAnnualReproductiveAllocation;
+    const double substepBudget = annualBudget * dtYears;
+
+    if (energy - eventCost < genome.minReproductionReserve)
+        return false;
+
+    if (eventCost > substepBudget)
+        return false;
+
+    energy -= eventCost;
     return true;
 }
 
@@ -320,7 +336,10 @@ Organism::Genome Organism::MakeMutatedGenome(std::mt19937& randomGenerator) cons
     mutated.limbRadiusRatio = std::clamp(mutateDouble(mutated.limbRadiusRatio), 0.01, 0.2);
     mutated.rootRadiusRatio = std::clamp(mutateDouble(mutated.rootRadiusRatio), 0.005, 0.12);
     mutated.branchSpawnEnergy = std::clamp(mutateDouble(mutated.branchSpawnEnergy), 1000.0, 5.0e6);
-    mutated.seedEnergyCost = std::clamp(mutateDouble(mutated.seedEnergyCost), 1000.0, 5.0e6);
+    mutated.seedEnergyCost = std::clamp(mutateDouble(mutated.seedEnergyCost), 1000.0, 2.0e6);
+    mutated.reproductionOverhead = std::clamp(mutateDouble(mutated.reproductionOverhead), 0.0, 1.0e6);
+    mutated.maxAnnualReproductiveAllocation = std::clamp(mutateDouble(mutated.maxAnnualReproductiveAllocation), 0.02, 0.60);
+    mutated.minReproductionReserve = std::clamp(mutateDouble(mutated.minReproductionReserve), 1000.0, 2.0e6);
     mutated.seedInitialEnergy = std::clamp(mutateDouble(mutated.seedInitialEnergy), 100.0, 100000.0);
     mutated.branchYawDegrees = mutateFloat(mutated.branchYawDegrees, 20.0f, 180.0f);
     mutated.branchPitchDegrees = mutateFloat(mutated.branchPitchDegrees, 5.0f, 120.0f);
@@ -328,6 +347,8 @@ Organism::Genome Organism::MakeMutatedGenome(std::mt19937& randomGenerator) cons
     mutated.initialShootLength = mutateFloat(mutated.initialShootLength, 0.01f, 0.4f);
     mutated.initialRootLength = mutateFloat(mutated.initialRootLength, 0.01f, 0.4f);
     mutated.initialRadius = mutateFloat(mutated.initialRadius, 0.001f, 0.03f);
+    mutated.minReproductionAgeYears = mutateFloat(mutated.minReproductionAgeYears, 0.5f, 50.0f);
+    mutated.minReproductionHeightM = mutateFloat(mutated.minReproductionHeightM, 0.1f, 30.0f);
 
     const double seedCount = std::clamp(mutateDouble(static_cast<double>(mutated.seedsPerReproduction)), 1.0, 20.0);
     mutated.seedsPerReproduction = static_cast<unsigned int>(std::round(seedCount));

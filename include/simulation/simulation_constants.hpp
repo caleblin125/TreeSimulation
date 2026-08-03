@@ -29,16 +29,22 @@ namespace SimulationConstants
     constexpr double WoodConstructionEnergyJPerKg = 17.0e6;
     constexpr double MaxBranchElongationMetersPerYear = 0.6;
     constexpr double AverageTreeSeedDryMassKg = 0.000488;
-    constexpr double SeedReserveEnergyDensityJPerKg = 20.0e6;
+    constexpr double SeedReserveEnergyDensityJPerKg = 24.0e6;
     constexpr double InitialEnergyJ = AverageTreeSeedDryMassKg * SeedReserveEnergyDensityJPerKg;
     constexpr double BranchSpawnEnergyJ = 500000.0;
-    constexpr double SeedEnergyCostJ = 250000.0;
+    constexpr double SeedProvisioningCostMultiplier = 4.0;
+    constexpr double SeedEnergyCostJ = InitialEnergyJ * SeedProvisioningCostMultiplier;
+    constexpr double ReproductionEventOverheadJ = 50000.0;
+    constexpr double MaxAnnualReproductiveAllocationFraction = 0.20;
+    constexpr double MinReproductionReserveJ = 150000.0;
+    constexpr float MinReproductionAgeYears = 5.0f;
+    constexpr float MinReproductionHeightM = 1.0f;
     constexpr double FractureEnergyLossPerNewton = 5.0;
     constexpr double OrganismDeathEnergyJ = 0.0;
 
     // Seed dispersal.
-    constexpr float ReproductionAttemptsPerYear = 0.8f;
-    constexpr unsigned int SeedsPerReproduction = 5;
+    constexpr float ReproductionAttemptsPerYear = 0.35f;
+    constexpr unsigned int SeedsPerReproduction = 3;
     constexpr float SeedMinDispersalRadiusM = 0.5f;
     constexpr float SeedMaxDispersalRadiusM = 8.0f;
     constexpr float SeedMinGerminationYears = 0.08f;

@@ -94,7 +94,7 @@ void World::SimulateSubstep(
 
         const Organism::Genome& genome = o->GetGenome();
         if (reproductionChance(randomGenerator) < SimulationConstants::ReproductionAttemptsPerYear * dtYears &&
-            o->TryReproduce(genome.seedEnergyCost))
+            o->TryReproduce(genome.seedsPerReproduction, dtYears))
         {
             SpawnSeeds(o->GetSeedOrigin(), genome.seedsPerReproduction, *o);
             seedsSpawned += genome.seedsPerReproduction;

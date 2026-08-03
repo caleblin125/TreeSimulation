@@ -28,6 +28,9 @@ class Organism{
             double rootRadiusRatio = 0.02;
             double branchSpawnEnergy = SimulationConstants::BranchSpawnEnergyJ;
             double seedEnergyCost = SimulationConstants::SeedEnergyCostJ;
+            double reproductionOverhead = SimulationConstants::ReproductionEventOverheadJ;
+            double maxAnnualReproductiveAllocation = SimulationConstants::MaxAnnualReproductiveAllocationFraction;
+            double minReproductionReserve = SimulationConstants::MinReproductionReserveJ;
             double seedInitialEnergy = SimulationConstants::InitialEnergyJ;
             float branchYawDegrees = 120.0f;
             float branchPitchDegrees = 60.0f;
@@ -35,6 +38,8 @@ class Organism{
             float initialShootLength = SimulationConstants::InitialShootLengthM;
             float initialRootLength = SimulationConstants::InitialRootLengthM;
             float initialRadius = SimulationConstants::InitialSeedlingRadiusM;
+            float minReproductionAgeYears = SimulationConstants::MinReproductionAgeYears;
+            float minReproductionHeightM = SimulationConstants::MinReproductionHeightM;
             unsigned int seedsPerReproduction = SimulationConstants::SeedsPerReproduction;
         };
 
@@ -55,6 +60,7 @@ class Organism{
             float shootGrowthLength = 0.0f;
             float rootGrowthLength = 0.0f;
             float maxHeight = 0.0f;
+            float ageYears = 0.0f;
             bool diedFromCoreFracture = false;
             bool alive = true;
         };
@@ -69,7 +75,7 @@ class Organism{
         std::vector<std::weak_ptr<Limb>> GetLimbs();
         BoundingBox GetBoundingBox();
         glm::vec3 GetSeedOrigin();
-        bool TryReproduce(double energyCost);
+        bool TryReproduce(unsigned int seedCount, double dtYears);
         const Genome& GetGenome() const;
         const Stats& GetLastStats() const;
         Genome MakeMutatedGenome(std::mt19937& randomGenerator) const;
@@ -97,5 +103,6 @@ class Organism{
         std::shared_ptr<Limb> rootSystem;
 
         double energy;
+        float ageYears = 0.0f;
         bool alive;
 };
