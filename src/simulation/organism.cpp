@@ -1,36 +1,12 @@
 #include "organism.hpp"
+#include "geometry.hpp"
+#include "physics.hpp"
 #include "simulation_constants.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <iostream>
-
-namespace
-{
-    void ExpandBounds(Organism::BoundingBox& bounds, const glm::vec3& point, float padding)
-    {
-        const glm::vec3 paddedMin = point - glm::vec3(padding);
-        const glm::vec3 paddedMax = point + glm::vec3(padding);
-        bounds.min = glm::min(bounds.min, paddedMin);
-        bounds.max = glm::max(bounds.max, paddedMax);
-    }
-
-    double CylinderVolume(float radius, float length)
-    {
-        return SimulationConstants::Pi * static_cast<double>(radius) * static_cast<double>(radius) * static_cast<double>(length);
-    }
-
-    glm::vec3 DownwardForce(double weight)
-    {
-        return glm::vec3(0.0f, -static_cast<float>(weight), 0.0f);
-    }
-
-    double BranchLateralArea(float radius, float length)
-    {
-        return 2.0 * SimulationConstants::Pi * static_cast<double>(radius) * static_cast<double>(length);
-    }
-}
 
 Organism::Organism(unsigned int id, glm::vec3 root, glm::quat orientation)
     : Organism(id, root, orientation, Genome{})
@@ -83,7 +59,7 @@ bool Organism::Simulate(float dtYears)
     double leafArea = 0.0;
     for (const auto& limb : limbs)
     {
-        const double area = BranchLateralArea(limb->radius, limb->length);
+        const double area = Geometry::CylinderLateralArea(limb->radius, limb->length);
         if (limb->isRoot)
             rootSurfaceArea += area;
         else
@@ -102,7 +78,7 @@ bool Organism::Simulate(float dtYears)
     const double activeSeconds = dtYears * SimulationConstants::SecondsPerYear * SimulationConstants::ActivePhotosynthesisFractionOfYear;
     for (const LimbLight& lit : limbLight)
     {
-        const double branchSurfaceArea = BranchLateralArea(lit.limb->radius, lit.limb->length);
+        const double branchSurfaceArea = Geometry::CylinderLateralArea(lit.limb->radius, lit.limb->length);
         const double leafArea = branchSurfaceArea * genome.leafAreaMultiplier;
         const double fixedCo2 = SimulationConstants::MaxLeafAssimilationMolCo2PerM2Second * leafArea * lit.exposure * resourceFactor * activeSeconds;
         const double gainedEnergy = fixedCo2 * SimulationConstants::EnergyJPerMolCo2Fixed;
@@ -112,7 +88,7 @@ bool Organism::Simulate(float dtYears)
 
     for (const auto& limb : limbs)
     {
-        const double branchSurfaceArea = BranchLateralArea(limb->radius, limb->length);
+        const double branchSurfaceArea = Geometry::CylinderLateralArea(limb->radius, limb->length);
         const double respiredCo2 = SimulationConstants::WoodyRespirationMolCo2PerM2Second * branchSurfaceArea * activeSeconds;
         const double respirationEnergy = respiredCo2 * SimulationConstants::EnergyJPerMolCo2Fixed;
         energy -= respirationEnergy;
@@ -126,11 +102,11 @@ bool Organism::Simulate(float dtYears)
 
     for (const LimbLight& lit : limbLight)
     {
-        const double oldVolume = CylinderVolume(lit.limb->radius, lit.limb->length);
+        const double oldVolume = Geometry::CylinderVolume(lit.limb->radius, lit.limb->length);
         float growth = static_cast<float>(genome.shootGrowthRate * (0.25 + 0.75 * lit.exposure) * dtYears);
         const float newLength = lit.limb->length + growth;
         const float newRadius = std::max(genome.initialRadius, static_cast<float>(newLength * genome.limbRadiusRatio));
-        const double newVolume = CylinderVolume(newRadius, newLength);
+        const double newVolume = Geometry::CylinderVolume(newRadius, newLength);
         const double addedMass = std::max(0.0, newVolume - oldVolume) * genome.woodDensity;
         const double growthCost = addedMass * SimulationConstants::WoodConstructionEnergyJPerKg;
 
@@ -151,7 +127,7 @@ bool Organism::Simulate(float dtYears)
 
         const float affordableLength = lit.limb->length + growth;
         const float affordableRadius = std::max(genome.initialRadius, static_cast<float>(affordableLength * genome.limbRadiusRatio));
-        const double affordableVolume = CylinderVolume(affordableRadius, affordableLength);
+        const double affordableVolume = Geometry::CylinderVolume(affordableRadius, affordableLength);
         const double affordableAddedMass = std::max(0.0, affordableVolume - oldVolume) * genome.woodDensity;
         const double affordableGrowthCost = affordableAddedMass * SimulationConstants::WoodConstructionEnergyJPerKg;
 
@@ -165,10 +141,10 @@ bool Organism::Simulate(float dtYears)
     double rootGrowth = genome.rootGrowthRate * dtYears * (1.0 - resourceFactor);
     if (rootGrowth > 0.0)
     {
-        const double oldVolume = CylinderVolume(rootSystem->radius, rootSystem->length);
+        const double oldVolume = Geometry::CylinderVolume(rootSystem->radius, rootSystem->length);
         const float newLength = rootSystem->length + static_cast<float>(rootGrowth);
         const float newRadius = std::max(genome.initialRadius, static_cast<float>(newLength * genome.rootRadiusRatio));
-        const double newVolume = CylinderVolume(newRadius, newLength);
+        const double newVolume = Geometry::CylinderVolume(newRadius, newLength);
         const double addedMass = std::max(0.0, newVolume - oldVolume) * genome.woodDensity;
         const double growthCost = addedMass * SimulationConstants::WoodConstructionEnergyJPerKg;
 
@@ -185,7 +161,7 @@ bool Organism::Simulate(float dtYears)
         {
             const float affordableLength = rootSystem->length + static_cast<float>(rootGrowth);
             const float affordableRadius = std::max(genome.initialRadius, static_cast<float>(affordableLength * genome.rootRadiusRatio));
-            const double affordableVolume = CylinderVolume(affordableRadius, affordableLength);
+            const double affordableVolume = Geometry::CylinderVolume(affordableRadius, affordableLength);
             const double affordableAddedMass = std::max(0.0, affordableVolume - oldVolume) * genome.woodDensity;
             const double affordableGrowthCost = affordableAddedMass * SimulationConstants::WoodConstructionEnergyJPerKg;
 
@@ -283,8 +259,8 @@ Organism::BoundingBox Organism::GetBoundingBox()
 
     for (const auto& limb : limbs)
     {
-        ExpandBounds(bounds, limb->root, limb->radius);
-        ExpandBounds(bounds, limb->end, limb->radius);
+        Geometry::ExpandBounds(bounds, limb->root, limb->radius);
+        Geometry::ExpandBounds(bounds, limb->end, limb->radius);
     }
 
     return bounds;
@@ -396,15 +372,15 @@ void Organism::UpdateLimbPoses(const std::shared_ptr<Limb>& limb)
 
 double Organism::UpdateBranchWeights(const std::shared_ptr<Limb>& limb)
 {
-    limb->ownWeight = CylinderVolume(limb->radius, limb->length) * genome.woodDensity * SimulationConstants::GravityMps2;
+    limb->ownWeight = Physics::CylinderWeight(limb->radius, limb->length, genome.woodDensity);
     limb->carriedWeight = limb->ownWeight;
-    limb->carriedTorque = glm::cross((limb->end - limb->root) * 0.5f, DownwardForce(limb->ownWeight));
+    limb->carriedTorque = glm::cross((limb->end - limb->root) * 0.5f, Physics::DownwardForce(limb->ownWeight));
 
     for (auto& child : limb->children)
     {
         limb->carriedWeight += UpdateBranchWeights(child);
         limb->carriedTorque += child->carriedTorque;
-        limb->carriedTorque += glm::cross(child->root - limb->root, DownwardForce(child->carriedWeight));
+        limb->carriedTorque += glm::cross(child->root - limb->root, Physics::DownwardForce(child->carriedWeight));
     }
 
     return limb->carriedWeight;
@@ -437,10 +413,7 @@ bool Organism::ExceedsStrength(const std::shared_ptr<Limb>& limb) const
         return false;
 
     const double torque = static_cast<double>(glm::length(limb->carriedTorque));
-    const double r = static_cast<double>(limb->radius);
-    const double sectionModulus = SimulationConstants::Pi * r * r * r / 4.0;
-    const double strength = genome.bendingStrength * sectionModulus * SimulationConstants::StructuralSafetyFactor;
-    return torque > strength;
+    return torque > Physics::BendingStrength(limb->radius, genome.bendingStrength);
 }
 
 std::vector<Organism::LimbLight> Organism::CalculateSunlight(const std::vector<std::shared_ptr<Limb>>& limbs) const

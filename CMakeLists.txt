@@ -25,6 +25,8 @@ add_library(TreeSimCore
     src/simulation/world.cpp
     src/simulation/organism.cpp
     src/simulation/limb.cpp
+    src/simulation/geometry.cpp
+    src/simulation/physics.cpp
 )
 target_include_directories(TreeSimCore PUBLIC
     src/simulation

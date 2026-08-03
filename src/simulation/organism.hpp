@@ -9,15 +9,12 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include "limb.hpp"
+#include "geometry.hpp"
 #include "simulation_constants.hpp"
 
 class Organism{
     public:
-        typedef struct
-        {
-            glm::vec3 min;
-            glm::vec3 max;
-        } BoundingBox;
+        using BoundingBox = Geometry::BoundingBox;
 
         struct Genome
         {
