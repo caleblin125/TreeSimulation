@@ -54,7 +54,8 @@ void World::Simulate(float dtYears)
     while (remainingYears > 0.0f)
     {
         const float substepYears = std::min(remainingYears, SimulationConstants::MaxStableStepYears);
-        SimulateSubstep(substepYears, deaths, coreFractureDeaths, propagulesSpawned, propagulesEstablished, propagulesFailed, profileSamples, totals, maxHeight);
+        const bool finalSubstep = remainingYears - substepYears <= 0.0f;
+        SimulateSubstep(substepYears, deaths, coreFractureDeaths, propagulesSpawned, propagulesEstablished, propagulesFailed, profileSamples, totals, maxHeight, finalSubstep);
         remainingYears -= substepYears;
     }
 
@@ -86,7 +87,8 @@ void World::SimulateSubstep(
     unsigned int& propagulesFailed,
     unsigned int& profileSamples,
     Organism::Stats& totals,
-    float& maxHeight)
+    float& maxHeight,
+    bool finalSubstep)
 {
     timeYears += dtYears;
 
@@ -100,7 +102,7 @@ void World::SimulateSubstep(
         profileSamples++;
         maxHeight = std::max(maxHeight, stats.maxHeight);
 
-        if (!alive)
+        if (!alive && (stats.diedFromCoreFracture || finalSubstep))
         {
             deaths++;
             if (stats.diedFromCoreFracture)
@@ -109,6 +111,9 @@ void World::SimulateSubstep(
             o.reset();
             continue;
         }
+
+        if (!alive)
+            continue;
 
         const Organism::Genome& genome = o->GetGenome();
         if (stats.reproductionPressure >= SimulationConstants::ReproductionSignalThreshold &&

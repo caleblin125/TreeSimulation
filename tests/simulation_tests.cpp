@@ -5,6 +5,7 @@
 #include "simulation/world.hpp"
 
 #include <cmath>
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
 #include <limits>
@@ -190,6 +191,25 @@ void TestDefaultProtoTreeSurvivesAsSimpleForm()
     Expect(organism.GetLastStats().reproductionPressure >= SimulationConstants::ReproductionSignalThreshold, "default proto-tree constantly tries reproduction");
 }
 
+void TestDefaultProtoTreeSurvivesStableSubsteps()
+{
+    Organism organism(9, glm::vec3(0.0f), glm::identity<glm::quat>());
+
+    bool alive = true;
+    float remainingYears = SimulationConstants::DefaultTimeStepYears;
+    while (remainingYears > 0.0f)
+    {
+        const float substepYears = std::min(remainingYears, SimulationConstants::MaxStableStepYears);
+        alive = organism.Simulate(substepYears);
+        remainingYears -= substepYears;
+    }
+
+    const Organism::Stats& stats = organism.GetLastStats();
+    Expect(alive, "default proto-tree survives stable substeps for one month");
+    Expect(stats.alive, "default proto-tree reports alive after stable substeps");
+    Expect(stats.energyEnd >= SimulationConstants::OrganismDeathEnergyJ, "default proto-tree energy remains non-negative after stable substeps");
+}
+
 void TestLimbBrainControlsSplitAndReproduction()
 {
     Organism::Genome genome;
@@ -277,6 +297,23 @@ void TestWorldInitialOrganismsHaveLimbs()
     Expect(world.GetOrganismCount() == 15, "world starts with requested organism count");
     Expect(world.GetLimbs().size() == 30, "each starting proto-tree contributes an upward and downward limb");
 }
+
+void TestWorldInitialOrganismsSurviveFirstMonth()
+{
+    World singleWorld;
+    singleWorld.MakeOrganism(glm::vec3(0.0f), glm::identity<glm::quat>());
+    singleWorld.Simulate(SimulationConstants::DefaultTimeStepYears);
+    Expect(singleWorld.GetOrganismCount() == 1, "single world proto-tree survives the first world month");
+
+    World world;
+    for (int i = 0; i < 15; ++i)
+        world.MakeOrganism(glm::vec3(static_cast<float>(i), 0.0f, 0.0f), glm::identity<glm::quat>());
+
+    world.Simulate(SimulationConstants::DefaultTimeStepYears);
+
+    Expect(world.GetOrganismCount() == 15, "starting proto-trees survive the first world month");
+    Expect(world.GetLimbs().size() >= 30, "starting proto-tree limbs remain after the first world month");
+}
 }
 
 int main()
@@ -287,11 +324,13 @@ int main()
     TestInitialRootAndBounds();
     TestMonthlyGrowth();
     TestDefaultProtoTreeSurvivesAsSimpleForm();
+    TestDefaultProtoTreeSurvivesStableSubsteps();
     TestLimbBrainControlsSplitAndReproduction();
     TestReproductionGates();
     TestGenomeMutationClamps();
     TestPropaguleEstablishment();
     TestWorldInitialOrganismsHaveLimbs();
+    TestWorldInitialOrganismsSurviveFirstMonth();
 
     if (failures > 0)
     {

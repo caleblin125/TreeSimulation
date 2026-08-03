@@ -99,6 +99,7 @@ bool Organism::Simulate(float dtYears)
     {
         return a.brain.elongation > b.brain.elongation;
     });
+    const double growthReserveEnergy = genome.seedInitialEnergy * SimulationConstants::GrowthReserveFraction;
 
     for (const LimbDecision& decision : limbDecisions)
     {
@@ -117,9 +118,10 @@ bool Organism::Simulate(float dtYears)
         if (growth <= 0.0f)
             continue;
 
-        if (energy < growthCost)
+        if (energy - growthCost < growthReserveEnergy)
         {
-            const double affordableMass = std::max(0.0, energy * 0.75) / SimulationConstants::WoodConstructionEnergyJPerKg;
+            const double affordableEnergy = std::max(0.0, energy - growthReserveEnergy) * 0.75;
+            const double affordableMass = affordableEnergy / SimulationConstants::WoodConstructionEnergyJPerKg;
             const double affordableVolume = affordableMass / genome.woodDensity;
             const double desiredAddedVolume = newVolume - oldVolume;
             const double growthScale = desiredAddedVolume <= 0.0 ? 0.0 : std::clamp(affordableVolume / desiredAddedVolume, 0.0, 1.0);
@@ -129,11 +131,25 @@ bool Organism::Simulate(float dtYears)
         if (growth <= 0.00001f)
             continue;
 
-        const float affordableLength = decision.limb->GetLength() + growth;
-        const float affordableRadius = std::max(genome.initialRadius, static_cast<float>(affordableLength * radiusRatio));
-        const double affordableVolume = Geometry::CylinderVolume(affordableRadius, affordableLength);
-        const double affordableAddedMass = std::max(0.0, affordableVolume - oldVolume) * genome.woodDensity;
-        const double affordableGrowthCost = affordableAddedMass * SimulationConstants::WoodConstructionEnergyJPerKg;
+        float affordableLength = decision.limb->GetLength() + growth;
+        float affordableRadius = std::max(genome.initialRadius, static_cast<float>(affordableLength * radiusRatio));
+        double affordableVolume = Geometry::CylinderVolume(affordableRadius, affordableLength);
+        double affordableAddedMass = std::max(0.0, affordableVolume - oldVolume) * genome.woodDensity;
+        double affordableGrowthCost = affordableAddedMass * SimulationConstants::WoodConstructionEnergyJPerKg;
+        const double maxGrowthSpend = std::max(0.0, energy - growthReserveEnergy);
+        if (affordableGrowthCost > maxGrowthSpend)
+        {
+            const double costScale = affordableGrowthCost <= 0.0 ? 0.0 : std::clamp(maxGrowthSpend / affordableGrowthCost, 0.0, 1.0);
+            growth *= static_cast<float>(costScale);
+            if (growth <= 0.00001f)
+                continue;
+
+            affordableLength = decision.limb->GetLength() + growth;
+            affordableRadius = std::max(genome.initialRadius, static_cast<float>(affordableLength * radiusRatio));
+            affordableVolume = Geometry::CylinderVolume(affordableRadius, affordableLength);
+            affordableAddedMass = std::max(0.0, affordableVolume - oldVolume) * genome.woodDensity;
+            affordableGrowthCost = affordableAddedMass * SimulationConstants::WoodConstructionEnergyJPerKg;
+        }
 
         decision.limb->SetLengthAndRadius(affordableLength, affordableRadius);
         energy -= affordableGrowthCost;
@@ -160,9 +176,10 @@ bool Organism::Simulate(float dtYears)
         const double addedMass = std::max(0.0, newVolume - oldVolume) * genome.woodDensity;
         const double growthCost = addedMass * SimulationConstants::WoodConstructionEnergyJPerKg;
 
-        if (energy < growthCost)
+        if (energy - growthCost < growthReserveEnergy)
         {
-            const double affordableMass = std::max(0.0, energy * 0.75) / SimulationConstants::WoodConstructionEnergyJPerKg;
+            const double affordableEnergy = std::max(0.0, energy - growthReserveEnergy) * 0.75;
+            const double affordableMass = affordableEnergy / SimulationConstants::WoodConstructionEnergyJPerKg;
             const double affordableVolume = affordableMass / genome.woodDensity;
             const double desiredAddedVolume = newVolume - oldVolume;
             const double growthScale = desiredAddedVolume <= 0.0 ? 0.0 : std::clamp(affordableVolume / desiredAddedVolume, 0.0, 1.0);
@@ -171,11 +188,25 @@ bool Organism::Simulate(float dtYears)
 
         if (rootGrowth > 0.00001)
         {
-            const float affordableLength = decision.limb->GetLength() + static_cast<float>(rootGrowth);
-            const float affordableRadius = std::max(genome.initialRadius, static_cast<float>(affordableLength * radiusRatio));
-            const double affordableVolume = Geometry::CylinderVolume(affordableRadius, affordableLength);
-            const double affordableAddedMass = std::max(0.0, affordableVolume - oldVolume) * genome.woodDensity;
-            const double affordableGrowthCost = affordableAddedMass * SimulationConstants::WoodConstructionEnergyJPerKg;
+            float affordableLength = decision.limb->GetLength() + static_cast<float>(rootGrowth);
+            float affordableRadius = std::max(genome.initialRadius, static_cast<float>(affordableLength * radiusRatio));
+            double affordableVolume = Geometry::CylinderVolume(affordableRadius, affordableLength);
+            double affordableAddedMass = std::max(0.0, affordableVolume - oldVolume) * genome.woodDensity;
+            double affordableGrowthCost = affordableAddedMass * SimulationConstants::WoodConstructionEnergyJPerKg;
+            const double maxGrowthSpend = std::max(0.0, energy - growthReserveEnergy);
+            if (affordableGrowthCost > maxGrowthSpend)
+            {
+                const double costScale = affordableGrowthCost <= 0.0 ? 0.0 : std::clamp(maxGrowthSpend / affordableGrowthCost, 0.0, 1.0);
+                rootGrowth *= costScale;
+                if (rootGrowth <= 0.00001)
+                    continue;
+
+                affordableLength = decision.limb->GetLength() + static_cast<float>(rootGrowth);
+                affordableRadius = std::max(genome.initialRadius, static_cast<float>(affordableLength * radiusRatio));
+                affordableVolume = Geometry::CylinderVolume(affordableRadius, affordableLength);
+                affordableAddedMass = std::max(0.0, affordableVolume - oldVolume) * genome.woodDensity;
+                affordableGrowthCost = affordableAddedMass * SimulationConstants::WoodConstructionEnergyJPerKg;
+            }
 
             decision.limb->SetLengthAndRadius(affordableLength, affordableRadius);
             energy -= affordableGrowthCost;

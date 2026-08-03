@@ -27,6 +27,7 @@ namespace SimulationConstants
 
     // Growth/reproduction tuning, SI-ish but still simplified by the current tree model.
     constexpr double WoodConstructionEnergyJPerKg = 17.0e6;
+    constexpr double GrowthReserveFraction = 0.35;
     constexpr double MaxBranchElongationMetersPerYear = 0.6;
     constexpr double AverageTreeSeedDryMassKg = 0.000488;
     constexpr double SeedReserveEnergyDensityJPerKg = 24.0e6;

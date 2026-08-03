@@ -47,7 +47,8 @@ private:
         unsigned int& propagulesFailed,
         unsigned int& profileSamples,
         Organism::Stats& totals,
-        float& maxHeight);
+        float& maxHeight,
+        bool finalSubstep);
     static void AccumulateStats(Organism::Stats& totals, const Organism::Stats& stats);
     void PrintProfilingSummary(
         unsigned int organismsBefore,
