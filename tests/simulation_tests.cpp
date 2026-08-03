@@ -116,6 +116,25 @@ void TestPhysics()
         "bending strength");
 }
 
+void TestLimbSurfaceResourceAccounting()
+{
+    Limb upward(glm::vec3(0.0f), glm::identity<glm::quat>(), 2.0f, 0.1f, 3.0);
+    Limb downward(
+        glm::vec3(0.0f),
+        glm::angleAxis(glm::radians(180.0f), glm::vec3(1.0f, 0.0f, 0.0f)),
+        2.0f,
+        0.1f,
+        3.0);
+
+    Expect(upward.CanPhotosynthesize(), "above-ground limb can photosynthesize");
+    Expect(!upward.IsUnderground(), "above-ground limb is not an extraction surface");
+    ExpectNear(upward.GroundExtractionArea(), 0.0, 1.0e-9, "above-ground limb extracts no ground resources");
+
+    Expect(downward.IsUnderground(), "downward limb extracts when below ground");
+    Expect(!downward.CanPhotosynthesize(), "fully underground limb does not photosynthesize");
+    ExpectNear(downward.GroundExtractionArea(), downward.SurfaceArea() * 3.0, 1.0e-9, "ground extraction multiplier scales underground area");
+}
+
 void TestInitialRootAndBounds()
 {
     Organism organism(1, glm::vec3(0.0f), glm::identity<glm::quat>());
@@ -127,13 +146,13 @@ void TestInitialRootAndBounds()
     {
         const Limb::LimbData data = limb->GetData();
         const glm::vec3 end = data.root + data.orientation * glm::vec3(0.0f, data.length, 0.0f);
-        hasRoot = hasRoot || (data.isRoot && end.y < data.root.y);
-        hasShoot = hasShoot || (!data.isRoot && end.y > data.root.y);
+        hasRoot = hasRoot || (end.y < data.root.y && limb->IsUnderground());
+        hasShoot = hasShoot || (end.y > data.root.y && limb->CanPhotosynthesize());
     }
 
     const Organism::BoundingBox bounds = organism.GetBoundingBox();
-    Expect(limbs.size() >= 2, "organism starts with shoot and root limbs");
-    Expect(hasRoot, "organism has a downward root limb");
+    Expect(limbs.size() >= 2, "organism starts with upward and downward limbs");
+    Expect(hasRoot, "organism has a downward underground limb");
     Expect(hasShoot, "organism has an upward shoot limb");
     Expect(bounds.min.y < 0.0f, "bounding box includes root below soil");
     Expect(bounds.max.y > 0.0f, "bounding box includes shoot above soil");
@@ -252,6 +271,7 @@ int main()
 {
     TestGeometry();
     TestPhysics();
+    TestLimbSurfaceResourceAccounting();
     TestInitialRootAndBounds();
     TestMonthlyGrowth();
     TestDefaultProtoTreeSurvivesAsSimpleForm();

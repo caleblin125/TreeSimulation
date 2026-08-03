@@ -20,16 +20,16 @@ public:
         double ownWeight;
         double carriedWeight;
         glm::vec3 carriedTorque;
-        bool isRoot;
+        double groundExtraction;
     } LimbData;
 
-    Limb(glm::vec3 root, glm::quat orientation, bool isRoot = false, float initialLength = 0.0f, float initialRadius = 0.0f);
-    Limb(std::weak_ptr<Limb> parent, float attachment, glm::quat rotation, bool isRoot = false, float initialLength = 0.0f, float initialRadius = 0.0f);
+    Limb(glm::vec3 root, glm::quat orientation, float initialLength = 0.0f, float initialRadius = 0.0f, double groundExtraction = 1.0);
+    Limb(std::weak_ptr<Limb> parent, float attachment, glm::quat rotation, float initialLength = 0.0f, float initialRadius = 0.0f, double groundExtraction = 1.0);
     void Spawn(float attachment, glm::quat localRotation, float initialLength, float initialRadius);
 
     LimbData GetData()
     {
-        return {root, length, radius, orientation, ownWeight, carriedWeight, carriedTorque, isRoot};
+        return {root, length, radius, orientation, ownWeight, carriedWeight, carriedTorque, groundExtraction};
     }
 
     std::vector<std::weak_ptr<Limb>> GetChildren()
@@ -42,6 +42,28 @@ public:
         }
         return weak_list;
     }
+
+    std::vector<std::shared_ptr<Limb>> CollectSubtree();
+    void UpdatePose();
+    double UpdateWeight(double density);
+    double PruneOverstressed(double bendingStrength);
+    bool ExceedsStrength(double bendingStrength) const;
+    double SurfaceArea() const;
+    double AboveGroundSurfaceArea() const;
+    double UndergroundSurfaceArea() const;
+    double GroundExtractionArea() const;
+    bool IsUnderground() const;
+    bool CanPhotosynthesize() const;
+    bool RayIntersects(const glm::vec3& origin, const glm::vec3& direction) const;
+    void SetLengthAndRadius(float newLength, float newRadius);
+    float GetLength() const;
+    float GetRadius() const;
+    const glm::vec3& GetRoot() const;
+    const glm::vec3& GetEnd() const;
+    const glm::quat& GetOrientation() const;
+    double GetCarriedWeight() const;
+    const glm::vec3& GetCarriedTorque() const;
+    bool HasChildren() const;
 
 protected:
     glm::vec3 root;   // Global root
@@ -56,7 +78,7 @@ protected:
 
     std::weak_ptr<Limb> parent;
     LimbList children;
-    bool isRoot = false;
+    double groundExtraction = 1.0;
 
     double water = 0.0;
     double nutrients = 0.0;

@@ -27,6 +27,7 @@ class Organism{
             double rootGrowthRate = SimulationConstants::MaxBranchElongationMetersPerYear;
             double leafAreaMultiplier = SimulationConstants::LeafAreaPerBranchSurfaceArea;
             double rootSupportedLeafArea = SimulationConstants::RootSupportedLeafAreaPerRootArea;
+            double groundExtractionMultiplier = 1.0;
             double woodDensity = SimulationConstants::BranchWoodDensityKgPerM3;
             double bendingStrength = SimulationConstants::BranchBendingStrengthPa;
             double limbRadiusRatio = 0.05;
@@ -119,15 +120,10 @@ class Organism{
         };
 
         std::vector<std::shared_ptr<Limb>> CollectLimbs();
-        void UpdateLimbPoses(const std::shared_ptr<Limb>& limb);
-        double UpdateBranchWeights(const std::shared_ptr<Limb>& limb);
-        double PruneOverstressedBranches(const std::shared_ptr<Limb>& limb);
-        bool ExceedsStrength(const std::shared_ptr<Limb>& limb) const;
         std::vector<LimbLight> CalculateSunlight(const std::vector<std::shared_ptr<Limb>>& limbs) const;
         std::vector<LimbDecision> EvaluateGrowthBrains(const std::vector<std::shared_ptr<Limb>>& limbs, const std::vector<LimbLight>& limbLight) const;
         BrainOutput EvaluateGrowthBrain(const std::shared_ptr<Limb>& limb, double exposure) const;
         double SunExposure(const std::shared_ptr<Limb>& limb, const std::vector<std::shared_ptr<Limb>>& limbs) const;
-        bool RayHitsLimb(const glm::vec3& origin, const glm::vec3& direction, const std::shared_ptr<Limb>& blocker) const;
 
         unsigned int id;
         Genome genome;

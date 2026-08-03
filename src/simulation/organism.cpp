@@ -18,15 +18,15 @@ Organism::Organism(unsigned int id, glm::vec3 root, glm::quat orientation, Genom
                                                                              core(std::make_shared<Limb>(
                                                                                  root,
                                                                                  orientation,
-                                                                                 false,
                                                                                  genome.initialShootLength,
-                                                                                 genome.initialRadius)),
+                                                                                 genome.initialRadius,
+                                                                                 genome.groundExtractionMultiplier)),
                                                                              rootSystem(std::make_shared<Limb>(
                                                                                  root,
                                                                                  orientation * glm::angleAxis(glm::radians(180.0f), glm::vec3(1.0f, 0.0f, 0.0f)),
-                                                                                 true,
                                                                                  genome.initialRootLength,
-                                                                                 genome.initialRadius)),
+                                                                                 genome.initialRadius,
+                                                                                 genome.groundExtractionMultiplier)),
                                                                              energy(genome.seedInitialEnergy),
                                                                              alive(true)
 {
@@ -49,10 +49,10 @@ bool Organism::Simulate(float dtYears)
         return alive;
     }
 
-    UpdateLimbPoses(core);
-    UpdateLimbPoses(rootSystem);
-    UpdateBranchWeights(core);
-    UpdateBranchWeights(rootSystem);
+    core->UpdatePose();
+    rootSystem->UpdatePose();
+    core->UpdateWeight(genome.woodDensity);
+    rootSystem->UpdateWeight(genome.woodDensity);
     std::vector<std::shared_ptr<Limb>> limbs = CollectLimbs();
     std::vector<LimbLight> limbLight = CalculateSunlight(limbs);
     lastStats.limbCount = static_cast<unsigned int>(limbs.size());
@@ -61,13 +61,10 @@ bool Organism::Simulate(float dtYears)
     double leafArea = 0.0;
     for (const auto& limb : limbs)
     {
-        const double area = Geometry::CylinderLateralArea(limb->radius, limb->length);
-        if (limb->isRoot)
-            rootSurfaceArea += area;
-        else
-            leafArea += area * genome.leafAreaMultiplier;
+        rootSurfaceArea += limb->GroundExtractionArea();
+        leafArea += limb->AboveGroundSurfaceArea() * genome.leafAreaMultiplier;
 
-        lastStats.maxHeight = std::max(lastStats.maxHeight, limb->end.y);
+        lastStats.maxHeight = std::max(lastStats.maxHeight, limb->GetEnd().y);
     }
 
     const double resourceFactor = leafArea <= 0.0
@@ -81,7 +78,7 @@ bool Organism::Simulate(float dtYears)
     const double activeSeconds = dtYears * SimulationConstants::SecondsPerYear * SimulationConstants::ActivePhotosynthesisFractionOfYear;
     for (const LimbLight& lit : limbLight)
     {
-        const double branchSurfaceArea = Geometry::CylinderLateralArea(lit.limb->radius, lit.limb->length);
+        const double branchSurfaceArea = lit.limb->AboveGroundSurfaceArea();
         const double leafArea = branchSurfaceArea * genome.leafAreaMultiplier;
         const double fixedCo2 = SimulationConstants::MaxLeafAssimilationMolCo2PerM2Second * leafArea * lit.exposure * resourceFactor * activeSeconds;
         const double gainedEnergy = fixedCo2 * SimulationConstants::EnergyJPerMolCo2Fixed;
@@ -91,7 +88,7 @@ bool Organism::Simulate(float dtYears)
 
     for (const auto& limb : limbs)
     {
-        const double branchSurfaceArea = Geometry::CylinderLateralArea(limb->radius, limb->length);
+        const double branchSurfaceArea = limb->SurfaceArea();
         const double respiredCo2 = SimulationConstants::WoodyRespirationMolCo2PerM2Second * branchSurfaceArea * activeSeconds;
         const double respirationEnergy = respiredCo2 * SimulationConstants::EnergyJPerMolCo2Fixed;
         energy -= respirationEnergy;
@@ -105,12 +102,12 @@ bool Organism::Simulate(float dtYears)
 
     for (const LimbDecision& decision : limbDecisions)
     {
-        if (decision.limb->isRoot)
+        if (!decision.limb->CanPhotosynthesize())
             continue;
 
-        const double oldVolume = Geometry::CylinderVolume(decision.limb->radius, decision.limb->length);
+        const double oldVolume = Geometry::CylinderVolume(decision.limb->GetRadius(), decision.limb->GetLength());
         float growth = static_cast<float>(genome.shootGrowthRate * decision.brain.elongation * dtYears);
-        const float newLength = decision.limb->length + growth;
+        const float newLength = decision.limb->GetLength() + growth;
         const double radiusRatio = genome.limbRadiusRatio * (0.45 + 1.25 * decision.brain.thickening);
         const float newRadius = std::max(genome.initialRadius, static_cast<float>(newLength * radiusRatio));
         const double newVolume = Geometry::CylinderVolume(newRadius, newLength);
@@ -132,14 +129,13 @@ bool Organism::Simulate(float dtYears)
         if (growth <= 0.00001f)
             continue;
 
-        const float affordableLength = decision.limb->length + growth;
+        const float affordableLength = decision.limb->GetLength() + growth;
         const float affordableRadius = std::max(genome.initialRadius, static_cast<float>(affordableLength * radiusRatio));
         const double affordableVolume = Geometry::CylinderVolume(affordableRadius, affordableLength);
         const double affordableAddedMass = std::max(0.0, affordableVolume - oldVolume) * genome.woodDensity;
         const double affordableGrowthCost = affordableAddedMass * SimulationConstants::WoodConstructionEnergyJPerKg;
 
-        decision.limb->length = affordableLength;
-        decision.limb->radius = affordableRadius;
+        decision.limb->SetLengthAndRadius(affordableLength, affordableRadius);
         energy -= affordableGrowthCost;
         lastStats.shootGrowthCost += affordableGrowthCost;
         lastStats.shootGrowthLength += growth;
@@ -147,7 +143,7 @@ bool Organism::Simulate(float dtYears)
 
     for (const LimbDecision& decision : limbDecisions)
     {
-        if (!decision.limb->isRoot)
+        if (!decision.limb->IsUnderground())
             continue;
 
         const double rootGrowthDemand = SimulationConstants::BaselineRootGrowthFraction +
@@ -156,8 +152,8 @@ bool Organism::Simulate(float dtYears)
         if (rootGrowth <= 0.0)
             continue;
 
-        const double oldVolume = Geometry::CylinderVolume(decision.limb->radius, decision.limb->length);
-        const float newLength = decision.limb->length + static_cast<float>(rootGrowth);
+        const double oldVolume = Geometry::CylinderVolume(decision.limb->GetRadius(), decision.limb->GetLength());
+        const float newLength = decision.limb->GetLength() + static_cast<float>(rootGrowth);
         const double radiusRatio = genome.rootRadiusRatio * (0.45 + 1.25 * decision.brain.thickening);
         const float newRadius = std::max(genome.initialRadius, static_cast<float>(newLength * radiusRatio));
         const double newVolume = Geometry::CylinderVolume(newRadius, newLength);
@@ -175,14 +171,13 @@ bool Organism::Simulate(float dtYears)
 
         if (rootGrowth > 0.00001)
         {
-            const float affordableLength = decision.limb->length + static_cast<float>(rootGrowth);
+            const float affordableLength = decision.limb->GetLength() + static_cast<float>(rootGrowth);
             const float affordableRadius = std::max(genome.initialRadius, static_cast<float>(affordableLength * radiusRatio));
             const double affordableVolume = Geometry::CylinderVolume(affordableRadius, affordableLength);
             const double affordableAddedMass = std::max(0.0, affordableVolume - oldVolume) * genome.woodDensity;
             const double affordableGrowthCost = affordableAddedMass * SimulationConstants::WoodConstructionEnergyJPerKg;
 
-            decision.limb->length = affordableLength;
-            decision.limb->radius = affordableRadius;
+            decision.limb->SetLengthAndRadius(affordableLength, affordableRadius);
             energy -= affordableGrowthCost;
             lastStats.rootGrowthCost += affordableGrowthCost;
             lastStats.rootGrowthLength += static_cast<float>(rootGrowth);
@@ -198,9 +193,9 @@ bool Organism::Simulate(float dtYears)
 
     auto branchParent = std::find_if(limbDecisions.begin(), limbDecisions.end(), [](const LimbDecision& decision)
     {
-        return !decision.limb->isRoot &&
-            decision.limb->length > 0.5f &&
-            decision.limb->children.empty() &&
+        return decision.limb->CanPhotosynthesize() &&
+            decision.limb->GetLength() > 0.5f &&
+            !decision.limb->HasChildren() &&
             decision.brain.split >= SimulationConstants::BranchSplitSignalThreshold;
     });
 
@@ -226,13 +221,13 @@ bool Organism::Simulate(float dtYears)
         energy -= genome.branchSpawnEnergy;
     }
 
-    UpdateLimbPoses(core);
-    UpdateLimbPoses(rootSystem);
-    UpdateBranchWeights(core);
-    UpdateBranchWeights(rootSystem);
-    if (ExceedsStrength(core))
+    core->UpdatePose();
+    rootSystem->UpdatePose();
+    core->UpdateWeight(genome.woodDensity);
+    rootSystem->UpdateWeight(genome.woodDensity);
+    if (core->ExceedsStrength(genome.bendingStrength))
     {
-        const double energyLoss = SimulationConstants::FractureEnergyLossPerNewton * core->carriedWeight;
+        const double energyLoss = SimulationConstants::FractureEnergyLossPerNewton * core->GetCarriedWeight();
         energy -= energyLoss;
         lastStats.fractureEnergyLoss += energyLoss;
         lastStats.diedFromCoreFracture = true;
@@ -243,10 +238,10 @@ bool Organism::Simulate(float dtYears)
         return alive;
     }
 
-    const double fractureEnergyLoss = PruneOverstressedBranches(core);
+    const double fractureEnergyLoss = core->PruneOverstressed(genome.bendingStrength);
     energy -= fractureEnergyLoss;
     lastStats.fractureEnergyLoss += fractureEnergyLoss;
-    UpdateBranchWeights(core);
+    core->UpdateWeight(genome.woodDensity);
     alive = energy >= SimulationConstants::OrganismDeathEnergyJ;
     lastStats.alive = alive;
     lastStats.energyEnd = energy;
@@ -273,8 +268,8 @@ std::vector<std::weak_ptr<Limb>> Organism::GetLimbs()
 
 Organism::BoundingBox Organism::GetBoundingBox()
 {
-    UpdateLimbPoses(core);
-    UpdateLimbPoses(rootSystem);
+    core->UpdatePose();
+    rootSystem->UpdatePose();
     const std::vector<std::shared_ptr<Limb>> limbs = CollectLimbs();
 
     BoundingBox bounds{
@@ -284,8 +279,8 @@ Organism::BoundingBox Organism::GetBoundingBox()
 
     for (const auto& limb : limbs)
     {
-        Geometry::ExpandBounds(bounds, limb->root, limb->radius);
-        Geometry::ExpandBounds(bounds, limb->end, limb->radius);
+        Geometry::ExpandBounds(bounds, limb->GetRoot(), limb->GetRadius());
+        Geometry::ExpandBounds(bounds, limb->GetEnd(), limb->GetRadius());
     }
 
     return bounds;
@@ -354,6 +349,7 @@ Organism::Genome Organism::MakeMutatedGenome(std::mt19937& randomGenerator) cons
     mutated.rootGrowthRate = mutateDouble(mutated.rootGrowthRate);
     mutated.leafAreaMultiplier = std::clamp(mutateDouble(mutated.leafAreaMultiplier), 0.5, 40.0);
     mutated.rootSupportedLeafArea = std::clamp(mutateDouble(mutated.rootSupportedLeafArea), 1.0, 100.0);
+    mutated.groundExtractionMultiplier = std::clamp(mutateDouble(mutated.groundExtractionMultiplier), 0.05, 20.0);
     mutated.woodDensity = std::clamp(mutateDouble(mutated.woodDensity), 100.0, 1200.0);
     mutated.bendingStrength = std::clamp(mutateDouble(mutated.bendingStrength), 5.0e6, 200.0e6);
     mutated.limbRadiusRatio = std::clamp(mutateDouble(mutated.limbRadiusRatio), 0.01, 0.2);
@@ -385,82 +381,12 @@ Organism::Genome Organism::MakeMutatedGenome(std::mt19937& randomGenerator) cons
 std::vector<std::shared_ptr<Limb>> Organism::CollectLimbs()
 {
     std::vector<std::shared_ptr<Limb>> ret;
-    ret.push_back(core);
-    ret.push_back(rootSystem);
-    size_t index = 0;
-    while (index < ret.size())
-    {
-        const auto children = ret[index]->GetChildren();
-        ret.reserve(ret.size() + children.size());
-        for (const auto& child : children)
-        {
-            if (!child.expired())
-                ret.push_back(child.lock());
-        }
-        index++;
-    }
+    const std::vector<std::shared_ptr<Limb>> coreLimbs = core->CollectSubtree();
+    const std::vector<std::shared_ptr<Limb>> supportLimbs = rootSystem->CollectSubtree();
+    ret.reserve(coreLimbs.size() + supportLimbs.size());
+    ret.insert(ret.end(), coreLimbs.begin(), coreLimbs.end());
+    ret.insert(ret.end(), supportLimbs.begin(), supportLimbs.end());
     return ret;
-}
-
-void Organism::UpdateLimbPoses(const std::shared_ptr<Limb>& limb)
-{
-    if (!limb->parent.expired())
-    {
-        auto parent = limb->parent.lock();
-        limb->root = parent->root + parent->orientation * glm::vec3(0.0f, parent->length * limb->attachment, 0.0f);
-        limb->orientation = parent->orientation * limb->rotation;
-    }
-
-    limb->end = limb->root + limb->orientation * glm::vec3(0.0f, limb->length, 0.0f);
-
-    for (auto& child : limb->children)
-        UpdateLimbPoses(child);
-}
-
-double Organism::UpdateBranchWeights(const std::shared_ptr<Limb>& limb)
-{
-    limb->ownWeight = Physics::CylinderWeight(limb->radius, limb->length, genome.woodDensity);
-    limb->carriedWeight = limb->ownWeight;
-    limb->carriedTorque = glm::cross((limb->end - limb->root) * 0.5f, Physics::DownwardForce(limb->ownWeight));
-
-    for (auto& child : limb->children)
-    {
-        limb->carriedWeight += UpdateBranchWeights(child);
-        limb->carriedTorque += child->carriedTorque;
-        limb->carriedTorque += glm::cross(child->root - limb->root, Physics::DownwardForce(child->carriedWeight));
-    }
-
-    return limb->carriedWeight;
-}
-
-double Organism::PruneOverstressedBranches(const std::shared_ptr<Limb>& limb)
-{
-    double energyLoss = 0.0;
-
-    for (auto child = limb->children.begin(); child != limb->children.end();)
-    {
-        energyLoss += PruneOverstressedBranches(*child);
-
-        if (ExceedsStrength(*child))
-        {
-            energyLoss += SimulationConstants::FractureEnergyLossPerNewton * (*child)->carriedWeight;
-            child = limb->children.erase(child);
-            continue;
-        }
-
-        ++child;
-    }
-
-    return energyLoss;
-}
-
-bool Organism::ExceedsStrength(const std::shared_ptr<Limb>& limb) const
-{
-    if (limb->radius <= 0.0f)
-        return false;
-
-    const double torque = static_cast<double>(glm::length(limb->carriedTorque));
-    return torque > Physics::BendingStrength(limb->radius, genome.bendingStrength);
 }
 
 std::vector<Organism::LimbLight> Organism::CalculateSunlight(const std::vector<std::shared_ptr<Limb>>& limbs) const
@@ -469,7 +395,7 @@ std::vector<Organism::LimbLight> Organism::CalculateSunlight(const std::vector<s
     ret.reserve(limbs.size());
     for (const auto& limb : limbs)
     {
-        if (!limb->isRoot)
+        if (limb->CanPhotosynthesize())
             ret.push_back({limb, SunExposure(limb, limbs)});
     }
     return ret;
@@ -498,13 +424,13 @@ std::vector<Organism::LimbDecision> Organism::EvaluateGrowthBrains(const std::ve
 
 Organism::BrainOutput Organism::EvaluateGrowthBrain(const std::shared_ptr<Limb>& limb, double exposure) const
 {
-    const double strength = limb->radius <= 0.0f
+    const double strength = limb->GetRadius() <= 0.0f
         ? 1.0
-        : Physics::BendingStrength(limb->radius, genome.bendingStrength);
-    const double torque = static_cast<double>(glm::length(limb->carriedTorque));
+        : Physics::BendingStrength(limb->GetRadius(), genome.bendingStrength);
+    const double torque = static_cast<double>(glm::length(limb->GetCarriedTorque()));
     const double torqueMargin = strength <= 0.0 ? 1.0 : std::clamp(1.0 - torque / strength, 0.0, 1.0);
     const double normalizedEnergy = std::clamp(energy / std::max(genome.minReproductionReserve, SimulationConstants::InitialEnergyJ), 0.0, 1.0);
-    const double normalizedLength = std::clamp(static_cast<double>(limb->length) / std::max(0.1, static_cast<double>(genome.minReproductionHeightM)), 0.0, 1.0);
+    const double normalizedLength = std::clamp(static_cast<double>(limb->GetLength()) / std::max(0.1, static_cast<double>(genome.minReproductionHeightM)), 0.0, 1.0);
     const double normalizedAge = std::clamp(static_cast<double>(ageYears) / std::max(0.1f, genome.minReproductionAgeYears), 0.0, 1.0);
     const double normalizedHeight = std::clamp(static_cast<double>(lastStats.maxHeight) / std::max(0.1f, genome.minReproductionHeightM), 0.0, 1.0);
 
@@ -512,7 +438,7 @@ Organism::BrainOutput Organism::EvaluateGrowthBrain(const std::shared_ptr<Limb>&
         normalizedEnergy,
         lastStats.resourceFactor,
         std::clamp(exposure, 0.0, 1.0),
-        limb->isRoot ? 1.0 : 0.0,
+        limb->IsUnderground() ? 1.0 : 0.0,
         normalizedLength,
         torqueMargin,
         normalizedAge,
@@ -549,7 +475,7 @@ Organism::BrainOutput Organism::EvaluateGrowthBrain(const std::shared_ptr<Limb>&
 double Organism::SunExposure(const std::shared_ptr<Limb>& limb, const std::vector<std::shared_ptr<Limb>>& limbs) const
 {
     const glm::vec3 sunDirection = glm::normalize(glm::vec3(-0.35f, 1.0f, -0.2f));
-    const glm::vec3 axis = glm::normalize(limb->end - limb->root + glm::vec3(0.0f, 0.0001f, 0.0f));
+    const glm::vec3 axis = glm::normalize(limb->GetEnd() - limb->GetRoot() + glm::vec3(0.0f, 0.0001f, 0.0f));
     const double facing = std::clamp(1.0 - std::abs(static_cast<double>(glm::dot(axis, sunDirection))) * 0.85, 0.15, 1.0);
 
     constexpr int samples = 7;
@@ -557,7 +483,7 @@ double Organism::SunExposure(const std::shared_ptr<Limb>& limb, const std::vecto
     for (int i = 0; i < samples; ++i)
     {
         const float t = (static_cast<float>(i) + 0.5f) / static_cast<float>(samples);
-        const glm::vec3 sample = glm::mix(limb->root, limb->end, t);
+        const glm::vec3 sample = glm::mix(limb->GetRoot(), limb->GetEnd(), t);
         bool occluded = false;
 
         for (const auto& blocker : limbs)
@@ -565,7 +491,7 @@ double Organism::SunExposure(const std::shared_ptr<Limb>& limb, const std::vecto
             if (blocker == limb)
                 continue;
 
-            if (RayHitsLimb(sample, sunDirection, blocker))
+            if (blocker->RayIntersects(sample, sunDirection))
             {
                 occluded = true;
                 break;
@@ -577,43 +503,4 @@ double Organism::SunExposure(const std::shared_ptr<Limb>& limb, const std::vecto
     }
 
     return facing * (static_cast<double>(visible) / static_cast<double>(samples));
-}
-
-bool Organism::RayHitsLimb(const glm::vec3& origin, const glm::vec3& direction, const std::shared_ptr<Limb>& blocker) const
-{
-    const glm::vec3 segment = blocker->end - blocker->root;
-    const float segmentLengthSq = glm::dot(segment, segment);
-    if (segmentLengthSq <= std::numeric_limits<float>::epsilon())
-        return false;
-
-    const glm::vec3 w0 = origin - blocker->root;
-    const float a = 1.0f;
-    const float b = glm::dot(direction, segment);
-    const float c = segmentLengthSq;
-    const float d = glm::dot(direction, w0);
-    const float e = glm::dot(segment, w0);
-    const float denom = a * c - b * b;
-
-    float rayT = 0.0f;
-    float limbT = 0.0f;
-    if (std::abs(denom) > std::numeric_limits<float>::epsilon())
-    {
-        rayT = (b * e - c * d) / denom;
-        limbT = (a * e - b * d) / denom;
-    }
-    else
-    {
-        limbT = std::clamp(e / c, 0.0f, 1.0f);
-        rayT = glm::dot(blocker->root + segment * limbT - origin, direction);
-    }
-
-    if (rayT <= 0.01f)
-        return false;
-
-    limbT = std::clamp(limbT, 0.0f, 1.0f);
-    const glm::vec3 rayPoint = origin + direction * rayT;
-    const glm::vec3 limbPoint = blocker->root + segment * limbT;
-    const float shadowRadius = std::max(0.03f, blocker->radius * 1.25f);
-    const glm::vec3 delta = rayPoint - limbPoint;
-    return glm::dot(delta, delta) <= shadowRadius * shadowRadius;
 }
