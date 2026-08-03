@@ -145,6 +145,16 @@ Renderer::Renderer()
     glEnableVertexAttribArray(0);
     glBindVertexArray(0);
 
+    glGenVertexArrays(1, &boxVAO);
+    glGenBuffers(1, &boxVBO);
+
+    glBindVertexArray(boxVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, boxVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 3 * 24, nullptr, GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
+    glEnableVertexAttribArray(0);
+    glBindVertexArray(0);
+
     alive = true;
     lastFrameTime = glfwGetTime();
 }
@@ -153,6 +163,14 @@ void Renderer::ProcessKeyboardInput(float deltaTime)
 {
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
+
+    const bool debugKeyDown = glfwGetKey(window, GLFW_KEY_B) == GLFW_PRESS;
+    if (debugKeyDown && !debugKeyWasDown)
+    {
+        debugBounds = !debugBounds;
+        std::cout << "Debug bounding boxes: " << (debugBounds ? "on" : "off") << std::endl;
+    }
+    debugKeyWasDown = debugKeyDown;
 
     const glm::vec3 forward = glm::normalize(camera.GetFront());
     const glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3(0.0f, 1.0f, 0.0f)));
@@ -216,6 +234,10 @@ Renderer::~Renderer()
         glDeleteBuffers(1, &limbVBO);
     if (limbEBO)
         glDeleteBuffers(1, &limbEBO);
+    if (boxVAO)
+        glDeleteVertexArrays(1, &boxVAO);
+    if (boxVBO)
+        glDeleteBuffers(1, &boxVBO);
 
     if (window)
     {
@@ -230,6 +252,11 @@ Renderer::~Renderer()
 void Renderer::DrawLimb(std::weak_ptr<Limb> limb)
 {
     limbList.push_back(limb);
+}
+
+void Renderer::DrawBoundingBox(const Organism::BoundingBox& bounds)
+{
+    boundingBoxes.push_back(bounds);
 }
 
 bool Renderer::Update()
@@ -262,6 +289,7 @@ bool Renderer::Update()
     
     shader.SetMat4("uView", glm::value_ptr(view));
     shader.SetMat4("uProjection", glm::value_ptr(projection));
+    shader.SetInt("uUseUniformColor", 0);
 
     glBindVertexArray(floorVAO);
     glm::mat4 model = glm::mat4(1.0f);
@@ -295,6 +323,53 @@ bool Renderer::Update()
     limbList.clear();
     glBindVertexArray(0);
 
+    DrawDebugBoundingBoxes();
+    boundingBoxes.clear();
+
     glfwSwapBuffers(window);
     return true;
+}
+
+void Renderer::DrawDebugBoundingBoxes()
+{
+    if (!debugBounds || boundingBoxes.empty())
+        return;
+
+    shader.SetInt("uUseUniformColor", 1);
+    shader.SetVec4("uColor", 1.0f, 0.85f, 0.1f, 1.0f);
+    shader.SetMat4("uModel", glm::value_ptr(glm::mat4(1.0f)));
+
+    glBindVertexArray(boxVAO);
+    glLineWidth(2.0f);
+
+    for (const auto& bounds : boundingBoxes)
+    {
+        const glm::vec3& min = bounds.min;
+        const glm::vec3& max = bounds.max;
+
+        const float vertices[] = {
+            min.x, min.y, min.z, max.x, min.y, min.z,
+            max.x, min.y, min.z, max.x, min.y, max.z,
+            max.x, min.y, max.z, min.x, min.y, max.z,
+            min.x, min.y, max.z, min.x, min.y, min.z,
+
+            min.x, max.y, min.z, max.x, max.y, min.z,
+            max.x, max.y, min.z, max.x, max.y, max.z,
+            max.x, max.y, max.z, min.x, max.y, max.z,
+            min.x, max.y, max.z, min.x, max.y, min.z,
+
+            min.x, min.y, min.z, min.x, max.y, min.z,
+            max.x, min.y, min.z, max.x, max.y, min.z,
+            max.x, min.y, max.z, max.x, max.y, max.z,
+            min.x, min.y, max.z, min.x, max.y, max.z,
+        };
+
+        glBindBuffer(GL_ARRAY_BUFFER, boxVBO);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
+        glDrawArrays(GL_LINES, 0, 24);
+    }
+
+    glLineWidth(1.0f);
+    glBindVertexArray(0);
+    shader.SetInt("uUseUniformColor", 0);
 }

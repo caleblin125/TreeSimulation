@@ -134,3 +134,23 @@ void Shader::SetMat4(const char* name, const void* value) const
 {
     SetMat4(name, static_cast<const float*>(value));
 }
+
+void Shader::SetVec4(const char* name, float x, float y, float z, float w) const
+{
+    if (programId != 0)
+    {
+        int location = glGetUniformLocation(programId, name);
+        if (location >= 0)
+            glUniform4f(location, x, y, z, w);
+    }
+}
+
+void Shader::SetInt(const char* name, int value) const
+{
+    if (programId != 0)
+    {
+        int location = glGetUniformLocation(programId, name);
+        if (location >= 0)
+            glUniform1i(location, value);
+    }
+}

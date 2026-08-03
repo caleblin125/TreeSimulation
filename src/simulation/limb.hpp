@@ -17,16 +17,19 @@ public:
         float length;
         float radius;
         glm::quat orientation;
+        double ownWeight;
+        double carriedWeight;
+        glm::vec3 carriedTorque;
+        bool isRoot;
     } LimbData;
 
-    Limb(glm::vec3 root, glm::quat orientation);
-    Limb(std::weak_ptr<Limb> parent, float attachment, glm::quat rotation);
-    void Simulate(float dt);
-    void Spawn(float attachment, glm::quat localRotation);
+    Limb(glm::vec3 root, glm::quat orientation, bool isRoot = false, float initialLength = 0.0f, float initialRadius = 0.0f);
+    Limb(std::weak_ptr<Limb> parent, float attachment, glm::quat rotation, bool isRoot = false, float initialLength = 0.0f, float initialRadius = 0.0f);
+    void Spawn(float attachment, glm::quat localRotation, float initialLength, float initialRadius);
 
     LimbData GetData()
     {
-        return {root, length, radius, orientation};
+        return {root, length, radius, orientation, ownWeight, carriedWeight, carriedTorque, isRoot};
     }
 
     std::vector<std::weak_ptr<Limb>> GetChildren()
@@ -53,4 +56,13 @@ protected:
 
     std::weak_ptr<Limb> parent;
     LimbList children;
+    bool isRoot = false;
+
+    double water = 0.0;
+    double nutrients = 0.0;
+    double ownWeight = 0.0;
+    double carriedWeight = 0.0;
+    glm::vec3 carriedTorque = glm::vec3(0.0f);
+
+    friend class Organism;
 };

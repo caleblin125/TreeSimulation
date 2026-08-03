@@ -1,0 +1,154 @@
+Simulation constants research notes
+===================================
+
+Units and time
+--------------
+The simulation now keeps mechanical quantities in SI-like units: meters, kilograms,
+newtons, joules, pascals, and seconds. Plant physiology is accelerated with
+BiologicalSecondsPerSimulationSecond = 86400, so one simulation second is treated
+as one biological day for photosynthesis, respiration, and growth.
+
+Wood density
+------------
+Value used: BranchWoodDensityKgPerM3 = 506 kg/m^3.
+
+Source: Zhao et al., "Wood Density and Fiber Dimensions of Root, Stem, and Branch
+Wood of Populus ussuriensis Kom. Trees", BioResources.
+https://bioresources.cnr.ncsu.edu/resources/wood-density-and-fiber-dimensions-of-root-stem-and-branch-wood-of-populus-ussuriensis-kom-trees/
+
+Reasoning: The article reports branch wood as the lowest-density position for
+Populus ussuriensis, with branch density about 0.506 g/cm^3. Converted to SI,
+that is 506 kg/m^3.
+
+Bending strength / branch failure
+---------------------------------
+Value used: BranchBendingStrengthPa = 66 MPa, with StructuralSafetyFactor = 0.35.
+
+Sources:
+Forest Products Laboratory, "Mechanical Properties of Wood", Wood Handbook,
+Chapter 5.
+https://www.fpl.fs.usda.gov/documnts/fplgtr/fplgtr282/chapter_05_fpl_gtr282.pdf
+
+Stod et al., "Modulus of Elasticity and Bending Strength of Scots Pine
+(Pinus sylvestris L.) Wood from Commercial Thinnings", Forests 2024.
+https://www.mdpi.com/1999-4907/15/3/567
+
+Reasoning: FPL describes modulus of rupture as a bending-strength criterion
+proportional to maximum moment. Scots pine thinning wood reports bending strength
+around 66 MPa for first-thinning material and about 80 MPa for older material.
+The sim uses 66 MPa and an explicit safety factor because living branches have
+knots, taper, dynamic loading, growth defects, and attachment weaknesses that are
+not represented by clear-wood lab tests.
+
+For a circular branch cross-section, max bending moment is approximated as:
+M = sigma * Z, where Z = pi * r^3 / 4.
+
+Photosynthesis
+--------------
+Value used: MaxLeafAssimilationMolCo2PerM2Second = 12 umol CO2/m^2/s.
+
+Sources:
+Soil Lab Modules, "Photosynthesis".
+https://labmodules.soilweb.ca/photosynthesis/
+
+LibreTexts Biology, "Photosynthesis - Pathway of Carbon Fixation".
+https://bio.libretexts.org/Bookshelves/Introductory_and_General_Biology/Biology_%28Kimball%29/04%3A_Cell_Metabolism/4.07%3A_Photosynthesis_-_Pathway_of_Carbon_Fixation
+
+CliffsNotes, "Energetics of Photosynthesis".
+https://www.cliffsnotes.com/study-guides/biology/biochemistry-ii/photosynthesis/energetics-of-photosynthesis
+
+Reasoning: Soil Lab defines net assimilation An in umol CO2 m^-2 s^-1 and leaf
+surface area S in m^2. The sim uses a typical order-of-magnitude leaf
+assimilation value of 12 umol CO2/m^2/s. LibreTexts gives the glucose
+photosynthesis stoichiometry of 6 CO2 per glucose. CliffsNotes gives about
+2870 kJ needed to synthesize 1 mol glucose, so the chemical energy stored per
+mol CO2 fixed is 2.87e6 / 6 = 478333 J/mol CO2.
+
+The current model has no leaves, so leaf area is estimated as:
+leafArea = branchLateralSurfaceArea * LeafAreaPerBranchSurfaceArea.
+This is a deliberate placeholder until explicit leaves are modeled.
+
+Woody respiration / maintenance
+-------------------------------
+Value used: WoodyRespirationMolCo2PerM2Second = 0.8 umol CO2/m^2/s.
+
+Source: Asao, Bedoya-Arrieta, and Ryan, "Variation in foliar respiration and
+wood CO2 efflux rates among species and canopy layers in a wet tropical forest",
+US Forest Service / Tree Physiology.
+https://research.fs.usda.gov/treesearch/48611
+
+Reasoning: The summary reports wood CO2 efflux around 0.6-0.9 umol/m^2/s for
+understory species and 1.0-1.6 umol/m^2/s for overstory trees. The sim uses the
+low end, 0.8 umol/m^2/s, because simulated trees are young and small. Respired
+CO2 is converted back to chemical energy cost with the same glucose-energy
+conversion used for photosynthesis.
+
+Energy model
+------------
+Value used: WoodConstructionEnergyJPerKg = 17 MJ/kg.
+
+Reasoning: This is a broad dry-biomass heat-content approximation used here as a
+construction energy scale for new wood. It is intentionally rough: real growth
+cost depends on carbon use efficiency, tissue chemistry, water content, nutrient
+status, and growth respiration.
+
+Seed reserve energy
+-------------------
+Values used:
+AverageTreeSeedDryMassKg = 0.000488 kg.
+SeedReserveEnergyDensityJPerKg = 20 MJ/kg.
+InitialEnergyJ = about 9760 J.
+
+Sources:
+Global Patterns in the Evolutionary Relations Between Seed Mass and Plant
+Functional Traits, Scientific Reports / PMC.
+https://pmc.ncbi.nlm.nih.gov/articles/PMC12158795/
+
+FAO, "Food energy - methods of analysis and conversion factors".
+https://www.fao.org/4/y5022e/y5022e04.htm
+
+JSTOR abstract, "Energy Values of Tree-Seeds Eaten by Small Mammals".
+https://www.jstor.org/stable/3543838
+
+Reasoning: The global tree-seed dataset reports most tree species between 0.1
+and 10,000 mg seed mass, with an average around 488 mg. FAO Atwater factors put
+carbohydrate/protein around 17 kJ/g and fat around 37 kJ/g. Tree-seed caloric
+values reported for whole seeds are about 4.4-6.8 kcal/g, or roughly
+18-28 kJ/g. The sim uses 20 kJ/g as a conservative mixed-reserve value:
+0.488 g * 20 kJ/g = 9.76 kJ = 9760 J.
+
+Root uptake
+-----------
+Value used: RootSupportedLeafAreaPerRootArea = 20.
+
+Reasoning: This is a modeling placeholder, not a researched biological
+constant. Each seedling now starts with a downward root limb. Root lateral
+surface area is treated as water/nutrient absorbing area, and photosynthesis is
+scaled by:
+
+min(1, rootSurfaceArea * RootSupportedLeafAreaPerRootArea / leafArea)
+
+This makes roots gate photosynthesis, but it does not yet model root hairs,
+mycorrhizae, soil water potential, nitrogen/phosphorus availability, or hydraulic
+conductance.
+
+Genetic variation
+-----------------
+Each organism now carries a Genome struct containing heritable growth,
+structure, photosynthesis, root uptake, and reproduction parameters. Seeds carry
+mutated copies of the parent genome. Mutation is currently multiplicative
+Gaussian noise with clamped bounds; there is no sexual recombination yet.
+
+Major known simplifications
+---------------------------
+1. There are no explicit leaves. Photosynthesis is estimated from branch surface
+   area times an artificial leaf-area multiplier.
+2. Roots are simple downward limbs. There is no branching root architecture,
+   root hairs, soil, water storage, nutrient pools, hydraulic limits, or drought.
+3. Branch strength ignores taper, knots, reaction wood, branch collars, and wind.
+4. The torque model uses static gravity only; no dynamic loads or self-collision.
+5. Energy is a single organism-wide pool, not local carbohydrate transport.
+6. Seeds germinate anywhere on the ground; there is no soil, shade competition,
+   dormancy, predation, or establishment mortality.
+7. Genetics are asexual only. There is no recombination, ploidy, developmental
+   gene regulation, or speciation tracking yet.
