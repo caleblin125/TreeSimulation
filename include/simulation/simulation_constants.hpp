@@ -31,7 +31,8 @@ namespace SimulationConstants
     constexpr double AverageTreeSeedDryMassKg = 0.000488;
     constexpr double SeedReserveEnergyDensityJPerKg = 24.0e6;
     constexpr double InitialEnergyJ = AverageTreeSeedDryMassKg * SeedReserveEnergyDensityJPerKg;
-    constexpr double BranchSpawnEnergyJ = 500000.0;
+    constexpr double BranchSpawnEnergyJ = 1.0e9;
+    constexpr double BaselineRootGrowthFraction = 0.15;
     constexpr double SeedProvisioningCostMultiplier = 4.0;
     constexpr double SeedEnergyCostJ = InitialEnergyJ * SeedProvisioningCostMultiplier;
     constexpr double ReproductionEventOverheadJ = 50000.0;

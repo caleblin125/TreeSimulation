@@ -154,6 +154,21 @@ void TestMonthlyGrowth()
     Expect(organism.GetLastStats().shootGrowthLength > 0.0f, "growth stats record shoot elongation");
 }
 
+void TestDefaultProtoTreeSurvivesAsSimpleForm()
+{
+    Organism organism(7, glm::vec3(0.0f), glm::identity<glm::quat>());
+
+    bool alive = true;
+    for (int month = 0; month < 24; ++month)
+        alive = organism.Simulate(SimulationConstants::DefaultTimeStepYears);
+
+    const std::vector<std::shared_ptr<Limb>> limbs = LockLimbs(organism.GetLimbs());
+    Expect(alive, "default proto-tree survives its first two years");
+    Expect(limbs.size() == 2, "default proto-tree remains one shoot plus one root during establishment");
+    Expect(organism.GetLastStats().shootGrowthLength > 0.0f, "default proto-tree keeps growing upward");
+    Expect(organism.GetLastStats().rootGrowthLength > 0.0f, "default proto-tree keeps growing downward");
+}
+
 void TestReproductionGates()
 {
     Organism seedling(3, glm::vec3(0.0f), glm::identity<glm::quat>());
@@ -213,6 +228,7 @@ int main()
     TestPhysics();
     TestInitialRootAndBounds();
     TestMonthlyGrowth();
+    TestDefaultProtoTreeSurvivesAsSimpleForm();
     TestReproductionGates();
     TestGenomeMutationClamps();
     TestPropaguleEstablishment();

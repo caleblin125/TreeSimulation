@@ -140,7 +140,9 @@ bool Organism::Simulate(float dtYears)
         lastStats.shootGrowthLength += growth;
     }
 
-    double rootGrowth = genome.rootGrowthRate * dtYears * (1.0 - resourceFactor);
+    const double rootGrowthDemand = SimulationConstants::BaselineRootGrowthFraction +
+        (1.0 - SimulationConstants::BaselineRootGrowthFraction) * (1.0 - resourceFactor);
+    double rootGrowth = genome.rootGrowthRate * dtYears * rootGrowthDemand;
     if (rootGrowth > 0.0)
     {
         const double oldVolume = Geometry::CylinderVolume(rootSystem->radius, rootSystem->length);
