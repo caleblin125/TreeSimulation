@@ -19,6 +19,10 @@ RenderFrame BuildRenderFrame(World& world, std::size_t& limbCount)
     RenderFrame frame;
     const std::vector<Organism::RenderSnapshot> snapshots = world.GetRenderSnapshots();
     limbCount = 0;
+    double totalEnergy = 0.0;
+    double totalHeight = 0.0;
+    double totalGrowth = 0.0;
+    double totalReproduction = 0.0;
 
     frame.plants.reserve(snapshots.size());
     for (const Organism::RenderSnapshot& snapshot : snapshots)
@@ -41,6 +45,18 @@ RenderFrame BuildRenderFrame(World& world, std::size_t& limbCount)
 
         limbCount += plant.limbs.size();
         frame.plants.push_back(std::move(plant));
+        totalEnergy += snapshot.energy;
+        totalHeight += snapshot.stats.maxHeight;
+        totalGrowth += snapshot.stats.shootGrowthLength + snapshot.stats.rootGrowthLength;
+        totalReproduction += snapshot.stats.reproductionPressure;
+        frame.metrics.growthVsReproduction.push_back({
+            static_cast<float>(snapshot.stats.shootGrowthLength + snapshot.stats.rootGrowthLength),
+            static_cast<float>(snapshot.stats.reproductionPressure)
+        });
+        frame.metrics.energyVsHeight.push_back({
+            static_cast<float>(snapshot.energy),
+            snapshot.stats.maxHeight
+        });
     }
 
     for (const World::SoilSample& sample : world.GetSoilSamples())
@@ -53,6 +69,14 @@ RenderFrame BuildRenderFrame(World& world, std::size_t& limbCount)
         });
     }
 
+    const double plantCount = std::max<std::size_t>(1, snapshots.size());
+    frame.metrics.timeYears = world.GetTimeYears();
+    frame.metrics.population = static_cast<float>(world.GetOrganismCount());
+    frame.metrics.propagules = static_cast<float>(world.GetPropaguleCount());
+    frame.metrics.avgEnergy = static_cast<float>(totalEnergy / plantCount);
+    frame.metrics.avgHeight = static_cast<float>(totalHeight / plantCount);
+    frame.metrics.avgGrowth = static_cast<float>(totalGrowth / plantCount);
+    frame.metrics.avgReproduction = static_cast<float>(totalReproduction / plantCount);
     frame.neuralSamples = world.GetNeuralNetworkSamples(4);
     return frame;
 }

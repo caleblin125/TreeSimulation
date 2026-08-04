@@ -328,6 +328,8 @@ void TestLimbBrainControlsSplitAndReproduction()
     genome.growthBrainWeights.fill(0.0);
     genome.growthBrainWeights[3 * (Organism::GrowthBrainInputCount + 1)] = 8.0;
     genome.growthBrainWeights[4 * (Organism::GrowthBrainInputCount + 1)] = 8.0;
+    genome.growthBrainWeights[5 * (Organism::GrowthBrainInputCount + 1)] = 0.0;
+    genome.growthBrainWeights[6 * (Organism::GrowthBrainInputCount + 1)] = 8.0;
 
     Organism organism(8, glm::vec3(0.0f), glm::identity<glm::quat>(), genome);
     const bool alive = organism.Simulate(SimulationConstants::DefaultTimeStepYears);
@@ -336,6 +338,8 @@ void TestLimbBrainControlsSplitAndReproduction()
     Expect(alive, "forced-brain organism survives one step");
     Expect(limbs.size() > 2, "high split output creates child limbs");
     Expect(organism.GetLastStats().splitSignals > 0, "split signal is recorded in stats");
+    Expect(organism.GetLastStats().branchesSpawned >= 3, "neural branch-count output controls child count");
+    ExpectNear(organism.GetLastStats().branchAttachment, 0.5, 0.01, "neural attachment output controls branch location");
     Expect(organism.GetLastStats().reproductionPressure >= SimulationConstants::ReproductionSignalThreshold, "high reproduction output is recorded in stats");
 }
 

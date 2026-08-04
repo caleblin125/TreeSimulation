@@ -48,6 +48,7 @@ namespace SimulationConstants
     constexpr double SeedReserveEnergyDensityJPerKg = 24.0e6;
     constexpr double InitialEnergyJ = AverageTreeSeedDryMassKg * SeedReserveEnergyDensityJPerKg;
     constexpr double BranchSpawnEnergyJ = 1.0e9;
+    constexpr unsigned int MaxBranchesPerSplit = 6;
     constexpr double BaselineRootGrowthFraction = 0.15;
     constexpr double BranchSplitSignalThreshold = 0.78;
     constexpr double ReproductionSignalThreshold = 0.65;

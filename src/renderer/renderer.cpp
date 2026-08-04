@@ -9,6 +9,8 @@
 #include <imgui_impl_opengl3.h>
 #include <chrono>
 #include <algorithm>
+#include <cfloat>
+#include <cstddef>
 #include <filesystem>
 #include <iostream>
 #include <limits>
@@ -332,6 +334,25 @@ void Renderer::SetFrame(RenderFrame frame)
     plants = std::move(frame.plants);
     soilCells = std::move(frame.soilCells);
     neuralSamples = std::move(frame.neuralSamples);
+    latestMetrics = std::move(frame.metrics);
+    if (latestMetrics.timeYears > lastMetricTime)
+    {
+        lastMetricTime = latestMetrics.timeYears;
+        populationHistory.push_back(latestMetrics.population);
+        avgEnergyHistory.push_back(latestMetrics.avgEnergy);
+        avgGrowthHistory.push_back(latestMetrics.avgGrowth);
+        avgReproductionHistory.push_back(latestMetrics.avgReproduction);
+        constexpr std::size_t maxHistory = 600;
+        auto trim = [&](std::vector<float>& values)
+        {
+            if (values.size() > maxHistory)
+                values.erase(values.begin(), values.begin() + static_cast<std::ptrdiff_t>(values.size() - maxHistory));
+        };
+        trim(populationHistory);
+        trim(avgEnergyHistory);
+        trim(avgGrowthHistory);
+        trim(avgReproductionHistory);
+    }
     if (selectedPlantId && !FindSelectedPlant())
         selectedPlantId.reset();
 }
@@ -611,6 +632,7 @@ bool Renderer::Update()
 
     DrawNeuralNetworkWindow();
     DrawSelectedPlantWindow();
+    DrawMetricsWindow();
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
@@ -729,7 +751,7 @@ void Renderer::DrawNeuralNetworkWindow()
     else
         ImGui::TextUnformatted("Selected plant: none");
 
-    static const char* outputNames[] = {"elongate", "thicken", "root", "split", "reproduce"};
+    static const char* outputNames[] = {"elongate", "thicken", "root", "split", "branch n", "attach", "reproduce"};
     static const char* inputNames[] = {"bias", "energy", "resource", "sun", "underground", "length", "torque", "age", "height"};
 
     for (std::size_t sampleIndex = 0; sampleIndex < neuralSamples.size(); ++sampleIndex)
@@ -750,6 +772,7 @@ void Renderer::DrawNeuralNetworkWindow()
             sample.stats.reproductionPressure,
             sample.stats.reproductionBudget,
             sample.stats.splitSignals);
+        ImGui::Text("branches %u   attachment %.2f", sample.stats.branchesSpawned, sample.stats.branchAttachment);
         ImGui::Text("photo %.1f J   transport %.1f J   respiration %.1f J   reserve %.1f J",
             sample.stats.photosynthesisEnergy,
             sample.stats.nutrientTransportEnergy,
@@ -820,9 +843,72 @@ void Renderer::DrawSelectedPlantWindow()
         stats.reproductionPressure,
         stats.reproductionBudget,
         stats.splitSignals);
+    ImGui::Text("branches %u   attachment %.2f", stats.branchesSpawned, stats.branchAttachment);
     ImGui::Text("bounds min %.2f %.2f %.2f", plant->bounds.min.x, plant->bounds.min.y, plant->bounds.min.z);
     ImGui::Text("bounds max %.2f %.2f %.2f", plant->bounds.max.x, plant->bounds.max.y, plant->bounds.max.z);
     ImGui::End();
+}
+
+void Renderer::DrawMetricsWindow()
+{
+    ImGui::Begin("Simulation metrics");
+    ImGui::Text("year %.2f   population %.0f   propagules %.0f",
+        latestMetrics.timeYears,
+        latestMetrics.population,
+        latestMetrics.propagules);
+    ImGui::Text("avg energy %.1f J   avg height %.2f m", latestMetrics.avgEnergy, latestMetrics.avgHeight);
+    ImGui::Text("avg growth %.4f m/step   avg reproduce %.2f", latestMetrics.avgGrowth, latestMetrics.avgReproduction);
+
+    if (!populationHistory.empty())
+        ImGui::PlotLines("population", populationHistory.data(), static_cast<int>(populationHistory.size()), 0, nullptr, 0.0f, FLT_MAX, ImVec2(0.0f, 80.0f));
+    if (!avgEnergyHistory.empty())
+        ImGui::PlotLines("avg energy", avgEnergyHistory.data(), static_cast<int>(avgEnergyHistory.size()), 0, nullptr, FLT_MAX, FLT_MAX, ImVec2(0.0f, 80.0f));
+    if (!avgGrowthHistory.empty())
+        ImGui::PlotLines("avg growth", avgGrowthHistory.data(), static_cast<int>(avgGrowthHistory.size()), 0, nullptr, 0.0f, FLT_MAX, ImVec2(0.0f, 80.0f));
+    if (!avgReproductionHistory.empty())
+        ImGui::PlotLines("avg reproduction", avgReproductionHistory.data(), static_cast<int>(avgReproductionHistory.size()), 0, nullptr, 0.0f, 1.0f, ImVec2(0.0f, 80.0f));
+
+    DrawScatterPlot("growth vs reproduction", latestMetrics.growthVsReproduction, "growth", "reproduce");
+    DrawScatterPlot("energy vs height", latestMetrics.energyVsHeight, "energy", "height");
+    ImGui::End();
+}
+
+void Renderer::DrawScatterPlot(const char* label, const std::vector<RenderFrame::ScatterPoint>& points, const char* xLabel, const char* yLabel)
+{
+    ImGui::TextUnformatted(label);
+    const ImVec2 size(ImGui::GetContentRegionAvail().x, 140.0f);
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    ImGui::InvisibleButton(label, size);
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    drawList->AddRect(origin, ImVec2(origin.x + size.x, origin.y + size.y), IM_COL32(110, 110, 110, 255));
+
+    if (points.empty())
+        return;
+
+    float minX = points.front().x;
+    float maxX = points.front().x;
+    float minY = points.front().y;
+    float maxY = points.front().y;
+    for (const RenderFrame::ScatterPoint& point : points)
+    {
+        minX = std::min(minX, point.x);
+        maxX = std::max(maxX, point.x);
+        minY = std::min(minY, point.y);
+        maxY = std::max(maxY, point.y);
+    }
+    if (std::abs(maxX - minX) < 1.0e-6f)
+        maxX = minX + 1.0f;
+    if (std::abs(maxY - minY) < 1.0e-6f)
+        maxY = minY + 1.0f;
+
+    for (const RenderFrame::ScatterPoint& point : points)
+    {
+        const float x = (point.x - minX) / (maxX - minX);
+        const float y = (point.y - minY) / (maxY - minY);
+        const ImVec2 p(origin.x + 6.0f + x * (size.x - 12.0f), origin.y + size.y - 6.0f - y * (size.y - 12.0f));
+        drawList->AddCircleFilled(p, 2.5f, IM_COL32(90, 220, 120, 220));
+    }
+    ImGui::Text("%s %.3g..%.3g   %s %.3g..%.3g", xLabel, minX, maxX, yLabel, minY, maxY);
 }
 
 void Renderer::DrawDebugBoundingBoxes()

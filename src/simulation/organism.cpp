@@ -265,6 +265,7 @@ bool Organism::Simulate(float dtYears, const Environment& environment)
     for (const LimbDecision& decision : limbDecisions)
     {
         lastStats.reproductionPressure = std::max(lastStats.reproductionPressure, decision.brain.reproduce);
+        lastStats.branchAttachment = std::max(lastStats.branchAttachment, decision.brain.branchAttachment);
         if (decision.brain.split >= SimulationConstants::BranchSplitSignalThreshold)
             lastStats.splitSignals++;
     }
@@ -277,26 +278,32 @@ bool Organism::Simulate(float dtYears, const Environment& environment)
             decision.brain.split >= SimulationConstants::BranchSplitSignalThreshold;
     });
 
-    if (energy > genome.branchSpawnEnergy && branchParent != limbDecisions.end())
+    if (branchParent != limbDecisions.end())
     {
-        std::shared_ptr<Limb> parent = branchParent->limb;
+        const unsigned int branchCount = 1u + static_cast<unsigned int>(std::round(
+            branchParent->brain.branchCount * static_cast<double>(SimulationConstants::MaxBranchesPerSplit - 1u)));
+        const double branchCost = genome.branchSpawnEnergy * static_cast<double>(branchCount);
+        if (energy > branchCost)
+        {
+            std::shared_ptr<Limb> parent = branchParent->limb;
+            const float attachment = static_cast<float>(std::clamp(branchParent->brain.branchAttachment, 0.0, 1.0));
 
-        glm::quat qYaw =
-            glm::angleAxis(glm::radians(genome.branchYawDegrees),
-                        glm::vec3(0.0f, 1.0f, 0.0f));
+            glm::quat qPitch =
+                glm::angleAxis(glm::radians(genome.branchPitchDegrees),
+                            glm::vec3(1.0f, 0.0f, 0.0f));
 
-        glm::quat qPitch =
-            glm::angleAxis(glm::radians(genome.branchPitchDegrees),
-                        glm::vec3(1.0f, 0.0f, 0.0f));
+            const float yawStep = 360.0f / static_cast<float>(branchCount);
+            for (unsigned int branchIndex = 0; branchIndex < branchCount; ++branchIndex)
+            {
+                const float yaw = genome.branchYawDegrees + yawStep * static_cast<float>(branchIndex);
+                const glm::quat qYaw = glm::angleAxis(glm::radians(yaw), glm::vec3(0.0f, 1.0f, 0.0f));
+                parent->Spawn(attachment, qYaw * qPitch, genome.initialShootLength, genome.initialRadius);
+            }
 
-        glm::quat rotation = qYaw * qPitch;
-        parent->Spawn(genome.childAttachment, rotation, genome.initialShootLength, genome.initialRadius);
-        rotation = qYaw * rotation;
-        parent->Spawn(genome.childAttachment, rotation, genome.initialShootLength, genome.initialRadius);
-        rotation = qYaw * rotation;
-        parent->Spawn(genome.childAttachment, rotation, genome.initialShootLength, genome.initialRadius);
-
-        energy -= genome.branchSpawnEnergy;
+            energy -= branchCost;
+            lastStats.branchesSpawned += branchCount;
+            lastStats.branchAttachment = attachment;
+        }
     }
 
     core->UpdatePose();
@@ -583,6 +590,8 @@ Organism::BrainOutput Organism::EvaluateGrowthBrain(const std::shared_ptr<Limb>&
         &output.thickening,
         &output.rootGrowth,
         &output.split,
+        &output.branchCount,
+        &output.branchAttachment,
         &output.reproduce
     };
 

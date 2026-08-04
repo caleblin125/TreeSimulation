@@ -18,7 +18,7 @@ class Organism{
     public:
         using BoundingBox = Geometry::BoundingBox;
         static constexpr std::size_t GrowthBrainInputCount = 8;
-        static constexpr std::size_t GrowthBrainOutputCount = 5;
+        static constexpr std::size_t GrowthBrainOutputCount = 7;
         static constexpr std::size_t GrowthBrainWeightCount = GrowthBrainOutputCount * (GrowthBrainInputCount + 1);
 
         struct Genome
@@ -55,6 +55,8 @@ class Organism{
                 0.50, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00,
                 3.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00,
                 -4.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00,
+                -1.50, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00,
+                1.20, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00,
                 3.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00
             };
         };
@@ -91,6 +93,8 @@ class Organism{
             double reproductionPressure = 0.0;
             double reproductionBudget = 0.0;
             unsigned int splitSignals = 0;
+            unsigned int branchesSpawned = 0;
+            double branchAttachment = 0.0;
             bool diedFromCoreFracture = false;
             bool alive = true;
         };
@@ -154,6 +158,8 @@ class Organism{
             double thickening = 0.0;
             double rootGrowth = 0.0;
             double split = 0.0;
+            double branchCount = 0.0;
+            double branchAttachment = 0.0;
             double reproduce = 0.0;
         };
 

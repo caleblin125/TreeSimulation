@@ -75,6 +75,11 @@ std::size_t World::GetPropaguleCount() const
     return propagules.size();
 }
 
+float World::GetTimeYears() const
+{
+    return timeYears;
+}
+
 double World::GetSoilResourceAt(glm::vec3 position) const
 {
     const auto cell = soilCells.find(SoilKey(position));

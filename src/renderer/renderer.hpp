@@ -45,9 +45,29 @@ struct RenderFrame
         float detritusKg = 0.0f;
     };
 
+    struct ScatterPoint
+    {
+        float x = 0.0f;
+        float y = 0.0f;
+    };
+
+    struct Metrics
+    {
+        float timeYears = 0.0f;
+        float population = 0.0f;
+        float propagules = 0.0f;
+        float avgEnergy = 0.0f;
+        float avgHeight = 0.0f;
+        float avgGrowth = 0.0f;
+        float avgReproduction = 0.0f;
+        std::vector<ScatterPoint> growthVsReproduction;
+        std::vector<ScatterPoint> energyVsHeight;
+    };
+
     std::vector<Plant> plants;
     std::vector<SoilCell> soilCells;
     std::vector<Organism::NeuralNetworkSample> neuralSamples;
+    Metrics metrics;
 };
 
 class Renderer {
@@ -72,6 +92,8 @@ private:
     void DrawDebugBoundingBoxes();
     void DrawNeuralNetworkWindow();
     void DrawSelectedPlantWindow();
+    void DrawMetricsWindow();
+    void DrawScatterPlot(const char* label, const std::vector<RenderFrame::ScatterPoint>& points, const char* xLabel, const char* yLabel);
     glm::vec4 PlantColor(const RenderFrame::Plant& plant, double maxEnergy) const;
     glm::vec4 LimbColor(const RenderFrame::Plant& plant, const RenderLimb& limb, double maxEnergy) const;
     const RenderFrame::Plant* FindSelectedPlant() const;
@@ -94,6 +116,12 @@ private:
     unsigned int boxVBO = 0;
     std::vector<Organism::NeuralNetworkSample> neuralSamples;
     std::vector<RenderFrame::SoilCell> soilCells;
+    RenderFrame::Metrics latestMetrics;
+    std::vector<float> populationHistory;
+    std::vector<float> avgEnergyHistory;
+    std::vector<float> avgGrowthHistory;
+    std::vector<float> avgReproductionHistory;
+    float lastMetricTime = -1.0f;
 
     enum class RenderMode
     {

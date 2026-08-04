@@ -34,6 +34,7 @@ public:
 
     std::size_t GetOrganismCount() const;
     std::size_t GetPropaguleCount() const;
+    float GetTimeYears() const;
     double GetSoilResourceAt(glm::vec3 position) const;
     std::vector<std::weak_ptr<Limb>> GetLimbs();
     std::vector<Organism::BoundingBox> GetBoundingBoxes();
