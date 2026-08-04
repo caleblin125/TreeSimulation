@@ -434,10 +434,15 @@ void World::AccumulateStats(Organism::Stats& totals, const Organism::Stats& stat
 
 void World::RecoverSoil(float dtYears)
 {
-    for (auto& [_, cell] : soilCells)
+    for (auto it = soilCells.begin(); it != soilCells.end();)
     {
+        SoilCell& cell = it->second;
         cell.resource += (1.0 - cell.resource) * SimulationConstants::SoilRecoveryPerYear * dtYears;
         cell.resource = std::clamp(cell.resource, 0.0, 1.0);
+        if (cell.resource >= 0.999)
+            it = soilCells.erase(it);
+        else
+            ++it;
     }
 }
 

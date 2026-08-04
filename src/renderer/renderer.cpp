@@ -332,6 +332,8 @@ void Renderer::SetFrame(RenderFrame frame)
     plants = std::move(frame.plants);
     soilCells = std::move(frame.soilCells);
     neuralSamples = std::move(frame.neuralSamples);
+    if (selectedPlantId && !FindSelectedPlant())
+        selectedPlantId.reset();
 }
 
 bool Renderer::IsAlive() const
@@ -512,6 +514,18 @@ void Renderer::DrawSoilNutrition()
     shader.SetInt("uUseUniformColor", 0);
 }
 
+const RenderFrame::Plant* Renderer::FindSelectedPlant() const
+{
+    if (!selectedPlantId)
+        return nullptr;
+
+    const auto selected = std::find_if(plants.begin(), plants.end(), [&](const RenderFrame::Plant& plant)
+    {
+        return plant.id == *selectedPlantId;
+    });
+    return selected == plants.end() ? nullptr : &*selected;
+}
+
 bool Renderer::Update()
 {
     if (!window || !alive)
@@ -596,6 +610,7 @@ bool Renderer::Update()
     DrawDebugBoundingBoxes();
 
     DrawNeuralNetworkWindow();
+    DrawSelectedPlantWindow();
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
@@ -768,6 +783,44 @@ void Renderer::DrawNeuralNetworkWindow()
         }
     }
 
+    ImGui::End();
+}
+
+void Renderer::DrawSelectedPlantWindow()
+{
+    const RenderFrame::Plant* plant = FindSelectedPlant();
+    if (!plant)
+        return;
+
+    const Organism::Stats& stats = plant->stats;
+    ImGui::Begin("Selected organism");
+    ImGui::Text("id %u   age %.2f years   limbs %u", plant->id, stats.ageYears, stats.limbCount);
+    ImGui::Text("energy %.1f J   start %.1f J   alive %s", plant->energy, stats.energyStart, stats.alive ? "yes" : "no");
+    ImGui::Separator();
+    ImGui::Text("height %.2f m   leaf %.3f m2   root %.3f m2", stats.maxHeight, stats.leafArea, stats.rootSurfaceArea);
+    ImGui::Text("resource %.2f   soil %.2f   root %.2f   hydraulic %.2f",
+        stats.resourceFactor,
+        stats.soilResourceFactor,
+        stats.rootResourceFactor,
+        stats.hydraulicResourceFactor);
+    ImGui::Text("soil pressure %.3f   sun occlusion %.3f", stats.soilCompetitionPressure, stats.sunlightOcclusionPressure);
+    ImGui::Text("xylem %.2f   embolism %.2f   bend %.1f MPa",
+        stats.xylemConductanceMultiplier,
+        stats.embolismLossFraction,
+        stats.effectiveBendingStrength / 1.0e6);
+    ImGui::Separator();
+    ImGui::Text("photo %.1f J   transport %.1f J", stats.photosynthesisEnergy, stats.nutrientTransportEnergy);
+    ImGui::Text("resp %.1f J   reserve decay %.1f J", stats.respirationEnergy, stats.reserveDecayEnergy);
+    ImGui::Text("shoot grow %.4f m / %.1f J", stats.shootGrowthLength, stats.shootGrowthCost);
+    ImGui::Text("root grow %.4f m / %.1f J", stats.rootGrowthLength, stats.rootGrowthCost);
+    ImGui::Text("fracture loss %.1f J", stats.fractureEnergyLoss);
+    ImGui::Separator();
+    ImGui::Text("reproduce %.2f   budget %.1f J   split signals %u",
+        stats.reproductionPressure,
+        stats.reproductionBudget,
+        stats.splitSignals);
+    ImGui::Text("bounds min %.2f %.2f %.2f", plant->bounds.min.x, plant->bounds.min.y, plant->bounds.min.z);
+    ImGui::Text("bounds max %.2f %.2f %.2f", plant->bounds.max.x, plant->bounds.max.y, plant->bounds.max.z);
     ImGui::End();
 }
 

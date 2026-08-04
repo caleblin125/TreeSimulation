@@ -497,6 +497,31 @@ void TestSoilDepletionAndCompetition()
     Expect(samples[0].stats.soilResourceFactor < 1.0 || samples[1].stats.soilResourceFactor < 1.0, "soil competition reduces resource factor");
 }
 
+void TestSoilRecoversAfterRootsLeave()
+{
+    Organism::Genome genome;
+    genome.seedInitialEnergy = 1.0;
+    genome.initialShootLength = 0.5f;
+    genome.initialRootLength = 2.0f;
+    genome.initialRadius = 0.2f;
+    genome.leafAreaMultiplier = 0.0;
+    genome.branchSpawnEnergy = 1.0e12;
+
+    World world;
+    world.MakeOrganism(glm::vec3(0.0f), glm::identity<glm::quat>(), genome);
+    for (int step = 0; step < 240 && world.GetOrganismCount() > 0; ++step)
+        world.Simulate(SimulationConstants::MaxStableStepYears);
+
+    const double depletedSoil = world.GetSoilResourceAt(glm::vec3(0.0f));
+    Expect(world.GetOrganismCount() == 0, "short-lived plant is removed after depleting soil");
+
+    world.Simulate(5.0f);
+    const double recoveredSoil = world.GetSoilResourceAt(glm::vec3(0.0f));
+
+    Expect(depletedSoil < 1.0, "short-lived roots deplete soil before removal");
+    Expect(recoveredSoil > depletedSoil, "soil nutrition replenishes after roots leave");
+}
+
 void TestExternalSunlightOcclusionReducesPhotosynthesis()
 {
     Organism::Genome targetGenome;
@@ -556,6 +581,7 @@ int main()
     TestWorldInitialOrganismsHaveLimbs();
     TestWorldInitialOrganismsSurviveFirstMonth();
     TestSoilDepletionAndCompetition();
+    TestSoilRecoversAfterRootsLeave();
     TestExternalSunlightOcclusionReducesPhotosynthesis();
 
     if (failures > 0)

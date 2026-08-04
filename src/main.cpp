@@ -26,6 +26,7 @@ RenderFrame BuildRenderFrame(World& world, std::size_t& limbCount)
         RenderFrame::Plant plant;
         plant.id = snapshot.id;
         plant.energy = snapshot.energy;
+        plant.stats = snapshot.stats;
         plant.bounds = snapshot.bounds;
         plant.limbs.reserve(snapshot.limbs.size());
 

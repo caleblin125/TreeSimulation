@@ -32,6 +32,7 @@ struct RenderFrame
     {
         unsigned int id = 0;
         double energy = 0.0;
+        Organism::Stats stats;
         Organism::BoundingBox bounds{};
         std::vector<RenderLimb> limbs;
     };
@@ -69,8 +70,10 @@ private:
     void DrawSoilNutrition();
     void DrawDebugBoundingBoxes();
     void DrawNeuralNetworkWindow();
+    void DrawSelectedPlantWindow();
     glm::vec4 PlantColor(const RenderFrame::Plant& plant, double maxEnergy) const;
     glm::vec4 LimbColor(const RenderFrame::Plant& plant, const RenderLimb& limb, double maxEnergy) const;
+    const RenderFrame::Plant* FindSelectedPlant() const;
 
     bool alive = false;
     GLFWwindow* window = nullptr;
