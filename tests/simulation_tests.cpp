@@ -487,9 +487,11 @@ void TestSoilDepletionAndCompetition()
     const double soilBefore = world.GetSoilResourceAt(glm::vec3(0.0f));
     world.Simulate(SimulationConstants::MaxStableStepYears);
     const double soilAfter = world.GetSoilResourceAt(glm::vec3(0.0f));
+    const std::vector<World::SoilSample> soilSamples = world.GetSoilSamples();
     const std::vector<Organism::NeuralNetworkSample> samples = world.GetNeuralNetworkSamples(2);
 
     Expect(soilAfter < soilBefore, "root uptake depletes local soil resource");
+    Expect(!soilSamples.empty(), "depleted soil cells are exposed for rendering");
     Expect(samples.size() == 2, "competition test keeps both organisms alive");
     Expect(samples[0].stats.soilCompetitionPressure > 0.0 || samples[1].stats.soilCompetitionPressure > 0.0, "nearby roots create soil competition pressure");
     Expect(samples[0].stats.soilResourceFactor < 1.0 || samples[1].stats.soilResourceFactor < 1.0, "soil competition reduces resource factor");

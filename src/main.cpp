@@ -1,4 +1,5 @@
 #include <chrono>
+#include <algorithm>
 #include <cstddef>
 #include <iostream>
 #include <random>
@@ -7,6 +8,7 @@
 #include <vector>
 
 #include "simulation/simulation_constants.hpp"
+#include "simulation/physics.hpp"
 #include "simulation/world.hpp"
 #include "renderer/renderer.hpp"
 
@@ -23,14 +25,30 @@ RenderFrame BuildRenderFrame(World& world, std::size_t& limbCount)
     {
         RenderFrame::Plant plant;
         plant.id = snapshot.id;
+        plant.energy = snapshot.energy;
         plant.bounds = snapshot.bounds;
         plant.limbs.reserve(snapshot.limbs.size());
 
         for (const Limb::LimbData& data : snapshot.limbs)
-            plant.limbs.push_back({data.root, data.length, data.radius, data.orientation});
+        {
+            const double strength = Physics::BendingStrength(data.radius, snapshot.stats.effectiveBendingStrength);
+            const float strain = strength <= 0.0
+                ? 0.0f
+                : static_cast<float>(std::clamp(glm::length(data.carriedTorque) / strength, 0.0, 1.0));
+            plant.limbs.push_back({data.root, data.length, data.radius, data.orientation, strain});
+        }
 
         limbCount += plant.limbs.size();
         frame.plants.push_back(std::move(plant));
+    }
+
+    for (const World::SoilSample& sample : world.GetSoilSamples())
+    {
+        frame.soilCells.push_back({
+            sample.cellX,
+            sample.cellZ,
+            static_cast<float>(std::clamp(sample.resource, 0.0, 1.0))
+        });
     }
 
     frame.neuralSamples = world.GetNeuralNetworkSamples(4);

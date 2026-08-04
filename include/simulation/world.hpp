@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 
 #include <random>
@@ -23,6 +24,13 @@ public:
     void AddPropagule(glm::vec3 position, Organism::Genome genome, float establishmentTime);
     void Simulate(float dt);
 
+    struct SoilSample
+    {
+        std::int32_t cellX = 0;
+        std::int32_t cellZ = 0;
+        double resource = 1.0;
+    };
+
     std::size_t GetOrganismCount() const;
     std::size_t GetPropaguleCount() const;
     double GetSoilResourceAt(glm::vec3 position) const;
@@ -30,6 +38,7 @@ public:
     std::vector<Organism::BoundingBox> GetBoundingBoxes();
     std::vector<Organism::NeuralNetworkSample> GetNeuralNetworkSamples(std::size_t maxSamples) const;
     std::vector<Organism::RenderSnapshot> GetRenderSnapshots();
+    std::vector<SoilSample> GetSoilSamples() const;
 
 private:
     struct Propagule

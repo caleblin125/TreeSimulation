@@ -441,6 +441,8 @@ Organism::RenderSnapshot Organism::GetRenderSnapshot()
 {
     RenderSnapshot snapshot;
     snapshot.id = id;
+    snapshot.energy = energy;
+    snapshot.stats = lastStats;
     snapshot.bounds = GetBoundingBox();
     const std::vector<std::shared_ptr<Limb>> limbs = CollectLimbs();
     snapshot.limbs.reserve(limbs.size());

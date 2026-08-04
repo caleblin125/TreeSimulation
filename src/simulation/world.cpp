@@ -327,6 +327,20 @@ std::vector<Organism::RenderSnapshot> World::GetRenderSnapshots()
     return ret;
 }
 
+std::vector<World::SoilSample> World::GetSoilSamples() const
+{
+    std::vector<SoilSample> ret;
+    ret.reserve(soilCells.size());
+    for (const auto& [key, cell] : soilCells)
+    {
+        const auto unsignedKey = static_cast<std::uint64_t>(key);
+        const auto cellX = static_cast<std::int32_t>(static_cast<std::uint32_t>(unsignedKey >> 32));
+        const auto cellZ = static_cast<std::int32_t>(static_cast<std::uint32_t>(unsignedKey & 0xffffffffULL));
+        ret.push_back({cellX, cellZ, cell.resource});
+    }
+    return ret;
+}
+
 void World::SpawnPropagules(const glm::vec3& origin, unsigned int count, Organism& parent)
 {
     std::uniform_real_distribution<float> angleDistribution(0.0f, 2.0f * static_cast<float>(SimulationConstants::Pi));

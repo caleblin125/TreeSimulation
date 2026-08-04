@@ -113,6 +113,8 @@ class Organism{
         struct RenderSnapshot
         {
             unsigned int id = 0;
+            double energy = 0.0;
+            Stats stats;
             BoundingBox bounds{};
             std::vector<Limb::LimbData> limbs;
         };

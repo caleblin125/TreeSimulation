@@ -1,5 +1,7 @@
 #include "renderer.hpp"
 
+#include "simulation/simulation_constants.hpp"
+
 #include <math.h>
 #include <glm/gtc/type_ptr.hpp>
 #include <imgui.h>
@@ -168,6 +170,15 @@ Renderer::Renderer()
     glEnableVertexAttribArray(0);
     glBindVertexArray(0);
 
+    glGenVertexArrays(1, &soilVAO);
+    glGenBuffers(1, &soilVBO);
+    glBindVertexArray(soilVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, soilVBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 3 * 6, nullptr, GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
+    glEnableVertexAttribArray(0);
+    glBindVertexArray(0);
+
     glGenVertexArrays(1, &boxVAO);
     glGenBuffers(1, &boxVBO);
 
@@ -275,6 +286,10 @@ Renderer::~Renderer()
         glDeleteVertexArrays(1, &boxVAO);
     if (boxVBO)
         glDeleteBuffers(1, &boxVBO);
+    if (soilVAO)
+        glDeleteVertexArrays(1, &soilVAO);
+    if (soilVBO)
+        glDeleteBuffers(1, &soilVBO);
 
     if (window)
     {
@@ -315,6 +330,7 @@ void Renderer::DrawBoundingBox(const Organism::BoundingBox& bounds)
 void Renderer::SetFrame(RenderFrame frame)
 {
     plants = std::move(frame.plants);
+    soilCells = std::move(frame.soilCells);
     neuralSamples = std::move(frame.neuralSamples);
 }
 
@@ -439,6 +455,63 @@ bool Renderer::RayIntersectsLimb(const glm::vec3& origin, const glm::vec3& direc
     return true;
 }
 
+glm::vec4 Renderer::PlantColor(const RenderFrame::Plant& plant, double maxEnergy) const
+{
+    const float t = static_cast<float>(std::clamp(plant.energy / maxEnergy, 0.0, 1.0));
+    return glm::vec4(1.0f - t, 0.18f + 0.75f * t, 0.12f, 1.0f);
+}
+
+glm::vec4 Renderer::LimbColor(const RenderFrame::Plant& plant, const RenderLimb& limb, double maxEnergy) const
+{
+    if (renderMode == RenderMode::PlantEnergy)
+        return PlantColor(plant, maxEnergy);
+
+    if (renderMode == RenderMode::PressureStrain)
+    {
+        const float t = std::clamp(limb.strain, 0.0f, 1.0f);
+        return glm::vec4(0.2f + 0.8f * t, 0.95f * (1.0f - t), 0.12f, 1.0f);
+    }
+
+    return glm::vec4(1.0f);
+}
+
+void Renderer::DrawSoilNutrition()
+{
+    if (renderMode != RenderMode::SoilNutrition || soilCells.empty())
+        return;
+
+    shader.SetInt("uUseUniformColor", 1);
+    shader.SetMat4("uModel", glm::value_ptr(glm::mat4(1.0f)));
+    glBindVertexArray(soilVAO);
+
+    constexpr float cellSize = static_cast<float>(SimulationConstants::SoilCellSizeM);
+    constexpr float y = 0.015f;
+    for (const RenderFrame::SoilCell& cell : soilCells)
+    {
+        const float x0 = static_cast<float>(cell.cellX) * cellSize;
+        const float z0 = static_cast<float>(cell.cellZ) * cellSize;
+        const float x1 = x0 + cellSize;
+        const float z1 = z0 + cellSize;
+        const float vertices[] = {
+            x0, y, z0,
+            x1, y, z0,
+            x1, y, z1,
+            x0, y, z0,
+            x1, y, z1,
+            x0, y, z1,
+        };
+
+        const float resource = std::clamp(cell.resource, 0.0f, 1.0f);
+        shader.SetVec4("uColor", 0.70f * (1.0f - resource), 0.22f + 0.65f * resource, 0.08f, 0.85f);
+        glBindBuffer(GL_ARRAY_BUFFER, soilVBO);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+    }
+
+    glBindVertexArray(0);
+    shader.SetInt("uUseUniformColor", 0);
+}
+
 bool Renderer::Update()
 {
     if (!window || !alive)
@@ -486,16 +559,28 @@ bool Renderer::Update()
     glm::mat4 model = glm::mat4(1.0f);
     shader.SetMat4("uModel", glm::value_ptr(model));
     glDrawArrays(GL_TRIANGLES, 0, 6);
+    DrawSoilNutrition();
 
     glBindVertexArray(limbVAO);
+    const auto maxEnergyIt = std::max_element(plants.begin(), plants.end(), [](const RenderFrame::Plant& a, const RenderFrame::Plant& b)
+    {
+        return a.energy < b.energy;
+    });
+    const double maxEnergy = maxEnergyIt == plants.end() ? 1.0 : std::max(1.0, maxEnergyIt->energy);
+
     for(const RenderFrame::Plant& plant : plants){
         const bool selected = selectedPlantId && plant.id == *selectedPlantId;
-        shader.SetInt("uUseUniformColor", selected ? 1 : 0);
-        if (selected)
-            shader.SetVec4("uColor", 0.25f, 1.0f, 0.35f, 1.0f);
 
         for (const RenderLimb& limb : plant.limbs)
         {
+            const glm::vec4 color = selected
+                ? glm::vec4(0.25f, 1.0f, 0.35f, 1.0f)
+                : LimbColor(plant, limb, maxEnergy);
+            const bool useUniformColor = selected || renderMode == RenderMode::PlantEnergy || renderMode == RenderMode::PressureStrain;
+            shader.SetInt("uUseUniformColor", useUniformColor ? 1 : 0);
+            if (useUniformColor)
+                shader.SetVec4("uColor", color.r, color.g, color.b, color.a);
+
             model = glm::mat4(1.0f);
             model = glm::translate(model, limb.root);
             model *= glm::mat4_cast(limb.orientation);
@@ -614,6 +699,15 @@ void RenderPipeline::RenderLoop()
 void Renderer::DrawNeuralNetworkWindow()
 {
     ImGui::Begin("Neural network samples");
+    int mode = static_cast<int>(renderMode);
+    ImGui::RadioButton("Default", &mode, static_cast<int>(RenderMode::Default));
+    ImGui::SameLine();
+    ImGui::RadioButton("Soil", &mode, static_cast<int>(RenderMode::SoilNutrition));
+    ImGui::SameLine();
+    ImGui::RadioButton("Energy", &mode, static_cast<int>(RenderMode::PlantEnergy));
+    ImGui::SameLine();
+    ImGui::RadioButton("Strain", &mode, static_cast<int>(RenderMode::PressureStrain));
+    renderMode = static_cast<RenderMode>(mode);
     ImGui::Text("Samples: %zu", neuralSamples.size());
     if (selectedPlantId)
         ImGui::Text("Selected plant: %u", *selectedPlantId);

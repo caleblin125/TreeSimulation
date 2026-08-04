@@ -23,6 +23,7 @@ struct RenderLimb
     float length = 0.0f;
     float radius = 0.0f;
     glm::quat orientation;
+    float strain = 0.0f;
 };
 
 struct RenderFrame
@@ -30,11 +31,20 @@ struct RenderFrame
     struct Plant
     {
         unsigned int id = 0;
+        double energy = 0.0;
         Organism::BoundingBox bounds{};
         std::vector<RenderLimb> limbs;
     };
 
+    struct SoilCell
+    {
+        int cellX = 0;
+        int cellZ = 0;
+        float resource = 1.0f;
+    };
+
     std::vector<Plant> plants;
+    std::vector<SoilCell> soilCells;
     std::vector<Organism::NeuralNetworkSample> neuralSamples;
 };
 
@@ -56,8 +66,11 @@ private:
     void PickPlant(double mouseX, double mouseY);
     bool RayIntersectsBounds(const glm::vec3& origin, const glm::vec3& direction, const Organism::BoundingBox& bounds, float& distance) const;
     bool RayIntersectsLimb(const glm::vec3& origin, const glm::vec3& direction, const RenderLimb& limb, float& distance) const;
+    void DrawSoilNutrition();
     void DrawDebugBoundingBoxes();
     void DrawNeuralNetworkWindow();
+    glm::vec4 PlantColor(const RenderFrame::Plant& plant, double maxEnergy) const;
+    glm::vec4 LimbColor(const RenderFrame::Plant& plant, const RenderLimb& limb, double maxEnergy) const;
 
     bool alive = false;
     GLFWwindow* window = nullptr;
@@ -70,10 +83,21 @@ private:
 
     unsigned int floorVAO = 0;
     unsigned int floorVBO = 0;
+    unsigned int soilVAO = 0;
+    unsigned int soilVBO = 0;
 
     unsigned int boxVAO = 0;
     unsigned int boxVBO = 0;
     std::vector<Organism::NeuralNetworkSample> neuralSamples;
+    std::vector<RenderFrame::SoilCell> soilCells;
+
+    enum class RenderMode
+    {
+        Default,
+        SoilNutrition,
+        PlantEnergy,
+        PressureStrain
+    };
 
     Shader shader;
     Camera camera;
@@ -89,6 +113,7 @@ private:
     bool debugBounds = false;
     bool debugKeyWasDown = false;
     bool imguiInitialized = false;
+    RenderMode renderMode = RenderMode::Default;
     std::optional<unsigned int> selectedPlantId;
 };
 
