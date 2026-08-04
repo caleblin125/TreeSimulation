@@ -252,6 +252,7 @@ void World::AccumulateStats(Organism::Stats& totals, const Organism::Stats& stat
     totals.rootSurfaceArea += stats.rootSurfaceArea;
     totals.shootGrowthLength += stats.shootGrowthLength;
     totals.rootGrowthLength += stats.rootGrowthLength;
+    totals.reproductionBudget += stats.reproductionBudget;
 }
 
 void World::PrintProfilingSummary(
@@ -275,6 +276,7 @@ void World::PrintProfilingSummary(
     const double avgEffectiveBendingStrengthMpa = totals.effectiveBendingStrength / sampleCount / 1.0e6;
     const double avgEnergyStart = totals.energyStart / sampleCount;
     const double avgEnergyEnd = totals.energyEnd / sampleCount;
+    const double avgReproductionBudget = totals.reproductionBudget / sampleCount;
 
     std::cout
         << std::fixed << std::setprecision(3)
@@ -297,6 +299,7 @@ void World::PrintProfilingSummary(
         << " rootGrowJ=" << totals.rootGrowthCost
         << " shootGrowM=" << totals.shootGrowthLength
         << " rootGrowM=" << totals.rootGrowthLength
+        << " avgReproBudget=" << avgReproductionBudget
         << " avgResource=" << avgResourceFactor
         << " avgRootResource=" << avgRootResourceFactor
         << " avgHydraulicResource=" << avgHydraulicResourceFactor

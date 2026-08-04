@@ -121,11 +121,21 @@ bool Organism::Simulate(float dtYears)
     energy -= reserveDecayEnergy;
     lastStats.reserveDecayEnergy = reserveDecayEnergy;
 
+    const double annualReproductionBudget = std::max(0.0, energy) * genome.maxAnnualReproductiveAllocation;
+    reproductiveEnergyBudget += annualReproductionBudget * dtYears;
+    reproductiveEnergyBudget = std::min(
+        reproductiveEnergyBudget,
+        annualReproductionBudget * SimulationConstants::ReproductiveBudgetCarryoverYears);
+
     std::sort(limbDecisions.begin(), limbDecisions.end(), [](const LimbDecision& a, const LimbDecision& b)
     {
         return a.brain.elongation > b.brain.elongation;
     });
     const double growthReserveEnergy = genome.seedInitialEnergy * SimulationConstants::GrowthReserveFraction;
+    auto growthSpendLimit = [&]()
+    {
+        return std::max(0.0, energy - growthReserveEnergy - reproductiveEnergyBudget);
+    };
 
     for (const LimbDecision& decision : limbDecisions)
     {
@@ -144,9 +154,9 @@ bool Organism::Simulate(float dtYears)
         if (growth <= 0.0f)
             continue;
 
-        if (energy - growthCost < growthReserveEnergy)
+        if (energy - growthCost < growthReserveEnergy + reproductiveEnergyBudget)
         {
-            const double affordableEnergy = std::max(0.0, energy - growthReserveEnergy) * 0.75;
+            const double affordableEnergy = growthSpendLimit() * 0.75;
             const double affordableMass = affordableEnergy / SimulationConstants::WoodConstructionEnergyJPerKg;
             const double affordableVolume = affordableMass / genome.woodDensity;
             const double desiredAddedVolume = newVolume - oldVolume;
@@ -162,7 +172,7 @@ bool Organism::Simulate(float dtYears)
         double affordableVolume = Geometry::CylinderVolume(affordableRadius, affordableLength);
         double affordableAddedMass = std::max(0.0, affordableVolume - oldVolume) * genome.woodDensity;
         double affordableGrowthCost = affordableAddedMass * SimulationConstants::WoodConstructionEnergyJPerKg;
-        const double maxGrowthSpend = std::max(0.0, energy - growthReserveEnergy);
+        const double maxGrowthSpend = growthSpendLimit();
         if (affordableGrowthCost > maxGrowthSpend)
         {
             const double costScale = affordableGrowthCost <= 0.0 ? 0.0 : std::clamp(maxGrowthSpend / affordableGrowthCost, 0.0, 1.0);
@@ -202,9 +212,9 @@ bool Organism::Simulate(float dtYears)
         const double addedMass = std::max(0.0, newVolume - oldVolume) * genome.woodDensity;
         const double growthCost = addedMass * SimulationConstants::WoodConstructionEnergyJPerKg;
 
-        if (energy - growthCost < growthReserveEnergy)
+        if (energy - growthCost < growthReserveEnergy + reproductiveEnergyBudget)
         {
-            const double affordableEnergy = std::max(0.0, energy - growthReserveEnergy) * 0.75;
+            const double affordableEnergy = growthSpendLimit() * 0.75;
             const double affordableMass = affordableEnergy / SimulationConstants::WoodConstructionEnergyJPerKg;
             const double affordableVolume = affordableMass / genome.woodDensity;
             const double desiredAddedVolume = newVolume - oldVolume;
@@ -219,7 +229,7 @@ bool Organism::Simulate(float dtYears)
             double affordableVolume = Geometry::CylinderVolume(affordableRadius, affordableLength);
             double affordableAddedMass = std::max(0.0, affordableVolume - oldVolume) * genome.woodDensity;
             double affordableGrowthCost = affordableAddedMass * SimulationConstants::WoodConstructionEnergyJPerKg;
-            const double maxGrowthSpend = std::max(0.0, energy - growthReserveEnergy);
+            const double maxGrowthSpend = growthSpendLimit();
             if (affordableGrowthCost > maxGrowthSpend)
             {
                 const double costScale = affordableGrowthCost <= 0.0 ? 0.0 : std::clamp(maxGrowthSpend / affordableGrowthCost, 0.0, 1.0);
@@ -302,6 +312,7 @@ bool Organism::Simulate(float dtYears)
     core->UpdateWeight(genome.woodDensity);
     alive = energy >= SimulationConstants::OrganismDeathEnergyJ;
     lastStats.alive = alive;
+    lastStats.reproductionBudget = reproductiveEnergyBudget;
     lastStats.energyEnd = energy;
     return alive;
 }
@@ -356,6 +367,8 @@ glm::vec3 Organism::GetSeedOrigin()
 
 bool Organism::TryReproduce(unsigned int seedCount, double dtYears)
 {
+    (void)dtYears;
+
     if (ageYears < genome.minReproductionAgeYears)
         return false;
 
@@ -364,16 +377,17 @@ bool Organism::TryReproduce(unsigned int seedCount, double dtYears)
         return false;
 
     const double eventCost = genome.reproductionOverhead + genome.seedEnergyCost * static_cast<double>(seedCount);
-    const double annualBudget = std::max(0.0, energy) * genome.maxAnnualReproductiveAllocation;
-    const double substepBudget = annualBudget * dtYears;
 
     if (energy - eventCost < genome.minReproductionReserve)
         return false;
 
-    if (eventCost > substepBudget)
+    if (eventCost > reproductiveEnergyBudget)
         return false;
 
+    reproductiveEnergyBudget -= eventCost;
     energy -= eventCost;
+    lastStats.reproductionBudget = reproductiveEnergyBudget;
+    lastStats.energyEnd = energy;
     return true;
 }
 

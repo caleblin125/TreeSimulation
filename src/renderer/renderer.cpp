@@ -487,7 +487,10 @@ void Renderer::DrawNeuralNetworkWindow()
             sample.stats.hydraulicResourceFactor,
             sample.stats.xylemConductanceMultiplier,
             sample.stats.embolismLossFraction);
-        ImGui::Text("reproduce %.2f   split signals %u", sample.stats.reproductionPressure, sample.stats.splitSignals);
+        ImGui::Text("reproduce %.2f   budget %.1f J   split signals %u",
+            sample.stats.reproductionPressure,
+            sample.stats.reproductionBudget,
+            sample.stats.splitSignals);
         ImGui::Text("photo %.1f J   transport %.1f J   respiration %.1f J   reserve %.1f J",
             sample.stats.photosynthesisEnergy,
             sample.stats.nutrientTransportEnergy,

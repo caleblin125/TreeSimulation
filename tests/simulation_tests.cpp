@@ -341,6 +341,54 @@ void TestReproductionGates()
     Expect(!capped.TryReproduce(3, 0.0001), "annual reproductive allocation blocks too-fast spawning");
 }
 
+void TestReproductionBudgetAccumulatesAcrossSubsteps()
+{
+    Organism::Genome genome;
+    genome.seedInitialEnergy = 1'000'000.0;
+    genome.initialShootLength = 1.0f;
+    genome.initialRootLength = 0.5f;
+    genome.initialRadius = 0.05f;
+    genome.shootGrowthRate = 0.0;
+    genome.rootGrowthRate = 0.0;
+    genome.woodDensity = 100.0;
+    genome.bendingStrength = 1.0e12;
+    genome.branchSpawnEnergy = 1.0e12;
+    genome.minReproductionAgeYears = 0.0f;
+    genome.minReproductionHeightM = 0.5f;
+    genome.minReproductionReserve = 100'000.0;
+
+    Organism organism(17, glm::vec3(0.0f), glm::identity<glm::quat>(), genome);
+    float remainingYears = 1.0f;
+    while (remainingYears > 0.0f)
+    {
+        const float substepYears = std::min(remainingYears, SimulationConstants::MaxStableStepYears);
+        organism.Simulate(substepYears);
+        remainingYears -= substepYears;
+    }
+
+    Expect(organism.GetLastStats().reproductionBudget > 0.0, "reproduction budget accrues across stable substeps");
+    Expect(organism.TryReproduce(genome.seedsPerReproduction, SimulationConstants::MaxStableStepYears), "mature plant can spend accumulated reproduction budget");
+}
+
+void TestDefaultProtoTreeCanEventuallyReproduce()
+{
+    Organism organism(18, glm::vec3(0.0f), glm::identity<glm::quat>());
+    float remainingYears = 8.0f;
+    bool alive = true;
+    while (remainingYears > 0.0f)
+    {
+        const float substepYears = std::min(remainingYears, SimulationConstants::MaxStableStepYears);
+        alive = organism.Simulate(substepYears);
+        remainingYears -= substepYears;
+    }
+
+    Expect(alive, "default proto-tree survives long enough to reproduce");
+    Expect(organism.GetLastStats().ageYears >= SimulationConstants::MinReproductionAgeYears, "default proto-tree reaches reproduction age");
+    Expect(organism.GetLastStats().maxHeight >= SimulationConstants::MinReproductionHeightM, "default proto-tree reaches reproduction height");
+    Expect(organism.GetLastStats().reproductionBudget >= SimulationConstants::ReproductionEventOverheadJ, "default proto-tree builds a reproduction budget");
+    Expect(organism.TryReproduce(SimulationConstants::SeedsPerReproduction, SimulationConstants::MaxStableStepYears), "default proto-tree can eventually pay for seeds");
+}
+
 void TestGenomeMutationClamps()
 {
     Organism parent(6, glm::vec3(0.0f), glm::identity<glm::quat>());
@@ -423,6 +471,8 @@ int main()
     TestDefaultProtoTreeSurvivesStableSubsteps();
     TestLimbBrainControlsSplitAndReproduction();
     TestReproductionGates();
+    TestReproductionBudgetAccumulatesAcrossSubsteps();
+    TestDefaultProtoTreeCanEventuallyReproduce();
     TestGenomeMutationClamps();
     TestPropaguleEstablishment();
     TestWorldInitialOrganismsHaveLimbs();

@@ -85,6 +85,7 @@ class Organism{
             float maxHeight = 0.0f;
             float ageYears = 0.0f;
             double reproductionPressure = 0.0;
+            double reproductionBudget = 0.0;
             unsigned int splitSignals = 0;
             bool diedFromCoreFracture = false;
             bool alive = true;
@@ -154,6 +155,7 @@ class Organism{
         std::shared_ptr<Limb> rootSystem;
 
         double energy;
+        double reproductiveEnergyBudget = 0.0;
         float ageYears = 0.0f;
         bool alive;
 };

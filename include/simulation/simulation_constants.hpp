@@ -55,6 +55,7 @@ namespace SimulationConstants
     constexpr double SeedEnergyCostJ = InitialEnergyJ * SeedProvisioningCostMultiplier;
     constexpr double ReproductionEventOverheadJ = 50000.0;
     constexpr double MaxAnnualReproductiveAllocationFraction = 0.20;
+    constexpr double ReproductiveBudgetCarryoverYears = 10.0;
     constexpr double MinReproductionReserveJ = 150000.0;
     constexpr float MinReproductionAgeYears = 5.0f;
     constexpr float MinReproductionHeightM = 1.0f;
