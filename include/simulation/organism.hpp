@@ -110,6 +110,13 @@ class Organism{
             std::array<double, GrowthBrainWeightCount> weights{};
         };
 
+        struct RenderSnapshot
+        {
+            unsigned int id = 0;
+            BoundingBox bounds{};
+            std::vector<Limb::LimbData> limbs;
+        };
+
         Organism(unsigned int id, glm::vec3 root, glm::quat orientation);
         Organism(unsigned int id, glm::vec3 root, glm::quat orientation, Genome genome);
         bool Simulate(float dt);
@@ -123,10 +130,12 @@ class Organism{
         glm::vec3 GetRootPosition() const;
         double EstimateRootSurfaceArea();
         glm::vec3 GetSeedOrigin();
+        unsigned int GetId() const;
         bool TryReproduce(unsigned int seedCount, double dtYears);
         const Genome& GetGenome() const;
         const Stats& GetLastStats() const;
         NeuralNetworkSample GetNeuralNetworkSample() const;
+        RenderSnapshot GetRenderSnapshot();
         Genome MakeMutatedGenome(std::mt19937& randomGenerator) const;
 
     private:

@@ -181,6 +181,14 @@ probability.
 
 Current default is seed-like:
 PropaguleEstablishmentProbability = 0.35.
+SeedMinDispersalRadiusM = 3 m.
+SeedMaxDispersalRadiusM = 40 m.
+
+The default seed dispersal radius is intentionally broader than the first
+prototype value to reduce parent/offspring clumping and create more spatial
+competition. It should eventually become a heritable dispersal trait with
+different modes for gravity, wind, water, animal dispersal, and spore-like
+propagules.
 
 When a propagule reaches its establishment time, it is removed from the pending
 pool. It either becomes a new organism or fails to establish. This represents

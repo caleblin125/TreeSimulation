@@ -3,6 +3,8 @@
 #include <iostream>
 #include <random>
 #include <thread>
+#include <utility>
+#include <vector>
 
 #include "simulation/simulation_constants.hpp"
 #include "simulation/world.hpp"
@@ -13,19 +15,24 @@ namespace
 RenderFrame BuildRenderFrame(World& world, std::size_t& limbCount)
 {
     RenderFrame frame;
-    auto limbs = world.GetLimbs();
-    limbCount = limbs.size();
+    const std::vector<Organism::RenderSnapshot> snapshots = world.GetRenderSnapshots();
+    limbCount = 0;
 
-    for (auto& limb : limbs)
+    frame.plants.reserve(snapshots.size());
+    for (const Organism::RenderSnapshot& snapshot : snapshots)
     {
-        if (limb.expired())
-            continue;
+        RenderFrame::Plant plant;
+        plant.id = snapshot.id;
+        plant.bounds = snapshot.bounds;
+        plant.limbs.reserve(snapshot.limbs.size());
 
-        const Limb::LimbData data = limb.lock()->GetData();
-        frame.limbs.push_back({data.root, data.length, data.radius, data.orientation});
+        for (const Limb::LimbData& data : snapshot.limbs)
+            plant.limbs.push_back({data.root, data.length, data.radius, data.orientation});
+
+        limbCount += plant.limbs.size();
+        frame.plants.push_back(std::move(plant));
     }
 
-    frame.boundingBoxes = world.GetBoundingBoxes();
     frame.neuralSamples = world.GetNeuralNetworkSamples(4);
     return frame;
 }

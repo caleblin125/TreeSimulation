@@ -66,8 +66,8 @@ namespace SimulationConstants
     // Propagule dispersal. The defaults describe seed-like propagules.
     constexpr float ReproductionAttemptsPerYear = 0.35f;
     constexpr unsigned int SeedsPerReproduction = 3;
-    constexpr float SeedMinDispersalRadiusM = 0.5f;
-    constexpr float SeedMaxDispersalRadiusM = 8.0f;
+    constexpr float SeedMinDispersalRadiusM = 3.0f;
+    constexpr float SeedMaxDispersalRadiusM = 40.0f;
     constexpr float SeedMinGerminationYears = 0.08f;
     constexpr float SeedMaxGerminationYears = 1.0f;
 

@@ -315,6 +315,18 @@ std::vector<Organism::NeuralNetworkSample> World::GetNeuralNetworkSamples(std::s
     return ret;
 }
 
+std::vector<Organism::RenderSnapshot> World::GetRenderSnapshots()
+{
+    std::vector<Organism::RenderSnapshot> ret;
+    ret.reserve(organisms.size());
+    for (auto& organism : organisms)
+    {
+        if (organism)
+            ret.push_back(organism->GetRenderSnapshot());
+    }
+    return ret;
+}
+
 void World::SpawnPropagules(const glm::vec3& origin, unsigned int count, Organism& parent)
 {
     std::uniform_real_distribution<float> angleDistribution(0.0f, 2.0f * static_cast<float>(SimulationConstants::Pi));

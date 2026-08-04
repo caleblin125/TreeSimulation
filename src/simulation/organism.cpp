@@ -391,6 +391,11 @@ glm::vec3 Organism::GetSeedOrigin()
     };
 }
 
+unsigned int Organism::GetId() const
+{
+    return id;
+}
+
 bool Organism::TryReproduce(unsigned int seedCount, double dtYears)
 {
     (void)dtYears;
@@ -430,6 +435,18 @@ const Organism::Stats& Organism::GetLastStats() const
 Organism::NeuralNetworkSample Organism::GetNeuralNetworkSample() const
 {
     return {id, ageYears, energy, lastStats, genome.growthBrainWeights};
+}
+
+Organism::RenderSnapshot Organism::GetRenderSnapshot()
+{
+    RenderSnapshot snapshot;
+    snapshot.id = id;
+    snapshot.bounds = GetBoundingBox();
+    const std::vector<std::shared_ptr<Limb>> limbs = CollectLimbs();
+    snapshot.limbs.reserve(limbs.size());
+    for (const auto& limb : limbs)
+        snapshot.limbs.push_back(limb->GetData());
+    return snapshot;
 }
 
 Organism::Genome Organism::MakeMutatedGenome(std::mt19937& randomGenerator) const

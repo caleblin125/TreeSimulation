@@ -29,6 +29,7 @@ public:
     std::vector<std::weak_ptr<Limb>> GetLimbs();
     std::vector<Organism::BoundingBox> GetBoundingBoxes();
     std::vector<Organism::NeuralNetworkSample> GetNeuralNetworkSamples(std::size_t maxSamples) const;
+    std::vector<Organism::RenderSnapshot> GetRenderSnapshots();
 
 private:
     struct Propagule

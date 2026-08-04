@@ -6,8 +6,10 @@
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
 #include <chrono>
+#include <algorithm>
 #include <filesystem>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <utility>
 
@@ -33,6 +35,13 @@ namespace
 void framebuffer_size_callback(GLFWwindow *window, int width, int height)
 {
     glViewport(0, 0, width, height);
+}
+
+void scroll_callback(GLFWwindow *window, double, double yoffset)
+{
+    Renderer* renderer = static_cast<Renderer*>(glfwGetWindowUserPointer(window));
+    if (renderer)
+        renderer->Zoom(static_cast<float>(yoffset));
 }
 
 unsigned int MakeLimb(unsigned int N, unsigned int EBO, unsigned int VBO)
@@ -91,6 +100,7 @@ Renderer::Renderer()
     }
 
     glfwMakeContextCurrent(window);
+    glfwSetWindowUserPointer(window, this);
     glfwSwapInterval(1);
 
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
@@ -103,6 +113,7 @@ Renderer::Renderer()
     }
 
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+    glfwSetScrollCallback(window, scroll_callback);
 
     glViewport(0, 0, 800, 600);
     IMGUI_CHECKVERSION();
@@ -217,6 +228,9 @@ void Renderer::ProcessMouseInput()
         if (!leftMouseDown)
         {
             leftMouseDown = true;
+            leftMouseDragged = false;
+            mouseDownX = mouseX;
+            mouseDownY = mouseY;
             lastMouseX = mouseX;
             lastMouseY = mouseY;
             return;
@@ -224,6 +238,8 @@ void Renderer::ProcessMouseInput()
 
         float xoffset = static_cast<float>(mouseX - lastMouseX);
         float yoffset = static_cast<float>(lastMouseY - mouseY);
+        if (std::abs(mouseX - mouseDownX) > 3.0 || std::abs(mouseY - mouseDownY) > 3.0)
+            leftMouseDragged = true;
         lastMouseX = mouseX;
         lastMouseY = mouseY;
 
@@ -234,6 +250,8 @@ void Renderer::ProcessMouseInput()
     }
     else
     {
+        if (leftMouseDown && !leftMouseDragged && !ImGui::GetIO().WantCaptureMouse)
+            PickPlant(mouseX, mouseY);
         leftMouseDown = false;
     }
 }
@@ -280,24 +298,145 @@ void Renderer::DrawLimb(std::weak_ptr<Limb> limb)
 
 void Renderer::DrawLimb(const RenderLimb& limb)
 {
-    limbList.push_back(limb);
+    RenderFrame::Plant loosePlant;
+    loosePlant.id = 0;
+    loosePlant.limbs.push_back(limb);
+    plants.push_back(std::move(loosePlant));
 }
 
 void Renderer::DrawBoundingBox(const Organism::BoundingBox& bounds)
 {
-    boundingBoxes.push_back(bounds);
+    RenderFrame::Plant loosePlant;
+    loosePlant.id = 0;
+    loosePlant.bounds = bounds;
+    plants.push_back(std::move(loosePlant));
 }
 
 void Renderer::SetFrame(RenderFrame frame)
 {
-    limbList = std::move(frame.limbs);
-    boundingBoxes = std::move(frame.boundingBoxes);
+    plants = std::move(frame.plants);
     neuralSamples = std::move(frame.neuralSamples);
 }
 
 bool Renderer::IsAlive() const
 {
     return alive;
+}
+
+void Renderer::Zoom(float steps)
+{
+    const float distance = std::clamp(steps, -5.0f, 5.0f) * moveSpeed * 1.5f;
+    camera.Move(glm::normalize(camera.GetFront()) * distance);
+}
+
+void Renderer::PickPlant(double mouseX, double mouseY)
+{
+    int windowWidth = 800;
+    int windowHeight = 600;
+    glfwGetWindowSize(window, &windowWidth, &windowHeight);
+    if (windowWidth <= 0 || windowHeight <= 0)
+        return;
+
+    const float x = (2.0f * static_cast<float>(mouseX)) / static_cast<float>(windowWidth) - 1.0f;
+    const float y = 1.0f - (2.0f * static_cast<float>(mouseY)) / static_cast<float>(windowHeight);
+    const glm::mat4 inverseViewProjection = glm::inverse(camera.ProjectionMatrix() * camera.ViewMatrix());
+    const glm::vec4 nearPoint = inverseViewProjection * glm::vec4(x, y, -1.0f, 1.0f);
+    const glm::vec4 farPoint = inverseViewProjection * glm::vec4(x, y, 1.0f, 1.0f);
+    const glm::vec3 rayOrigin = glm::vec3(nearPoint) / nearPoint.w;
+    const glm::vec3 rayFar = glm::vec3(farPoint) / farPoint.w;
+    const glm::vec3 rayDirection = glm::normalize(rayFar - rayOrigin);
+
+    std::optional<unsigned int> pickedId;
+    float bestDistance = std::numeric_limits<float>::max();
+    for (const RenderFrame::Plant& plant : plants)
+    {
+        float boundsDistance = 0.0f;
+        if (!RayIntersectsBounds(rayOrigin, rayDirection, plant.bounds, boundsDistance))
+            continue;
+
+        for (const RenderLimb& limb : plant.limbs)
+        {
+            float limbDistance = 0.0f;
+            if (RayIntersectsLimb(rayOrigin, rayDirection, limb, limbDistance) && limbDistance < bestDistance)
+            {
+                bestDistance = limbDistance;
+                pickedId = plant.id;
+            }
+        }
+    }
+
+    selectedPlantId = pickedId;
+    if (selectedPlantId)
+        std::cout << "Selected plant " << *selectedPlantId << std::endl;
+    else
+        std::cout << "Selected plant: none" << std::endl;
+}
+
+bool Renderer::RayIntersectsBounds(const glm::vec3& origin, const glm::vec3& direction, const Organism::BoundingBox& bounds, float& distance) const
+{
+    float tMin = 0.0f;
+    float tMax = std::numeric_limits<float>::max();
+    for (int axis = 0; axis < 3; ++axis)
+    {
+        const float originAxis = origin[axis];
+        const float directionAxis = direction[axis];
+        const float minAxis = bounds.min[axis];
+        const float maxAxis = bounds.max[axis];
+
+        if (std::abs(directionAxis) < 1.0e-6f)
+        {
+            if (originAxis < minAxis || originAxis > maxAxis)
+                return false;
+            continue;
+        }
+
+        float t1 = (minAxis - originAxis) / directionAxis;
+        float t2 = (maxAxis - originAxis) / directionAxis;
+        if (t1 > t2)
+            std::swap(t1, t2);
+
+        tMin = std::max(tMin, t1);
+        tMax = std::min(tMax, t2);
+        if (tMin > tMax)
+            return false;
+    }
+
+    distance = tMin;
+    return true;
+}
+
+bool Renderer::RayIntersectsLimb(const glm::vec3& origin, const glm::vec3& direction, const RenderLimb& limb, float& distance) const
+{
+    const glm::vec3 segmentStart = limb.root;
+    const glm::vec3 segmentEnd = limb.root + limb.orientation * glm::vec3(0.0f, limb.length, 0.0f);
+    const glm::vec3 segment = segmentEnd - segmentStart;
+    const float segmentLengthSq = glm::dot(segment, segment);
+    if (segmentLengthSq <= 1.0e-8f)
+        return false;
+
+    const glm::vec3 w0 = origin - segmentStart;
+    const float a = 1.0f;
+    const float b = glm::dot(direction, segment);
+    const float c = segmentLengthSq;
+    const float d = glm::dot(direction, w0);
+    const float e = glm::dot(segment, w0);
+    const float denominator = a * c - b * b;
+
+    float rayT = 0.0f;
+    float segmentT = 0.0f;
+    if (std::abs(denominator) > 1.0e-6f)
+        rayT = std::max(0.0f, (b * e - c * d) / denominator);
+    segmentT = std::clamp((b * rayT + e) / c, 0.0f, 1.0f);
+    rayT = std::max(0.0f, (b * segmentT - d) / a);
+
+    const glm::vec3 rayPoint = origin + direction * rayT;
+    const glm::vec3 segmentPoint = segmentStart + segment * segmentT;
+    const float hitRadius = std::max(limb.radius, 0.05f);
+    if (glm::length(rayPoint - segmentPoint) > hitRadius)
+        return false;
+
+    distance = rayT;
+    return true;
 }
 
 bool Renderer::Update()
@@ -315,6 +454,13 @@ bool Renderer::Update()
     const float currentTime = static_cast<float>(glfwGetTime());
     const float deltaTime = static_cast<float>(currentTime - lastFrameTime);
     lastFrameTime = currentTime;
+
+    int framebufferWidth = 800;
+    int framebufferHeight = 600;
+    glfwGetFramebufferSize(window, &framebufferWidth, &framebufferHeight);
+    const float aspect = framebufferHeight > 0 ? static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight) : 1.0f;
+    camera.SetPerspective(45.0f, aspect, 0.1f, 200.0f);
+
     ProcessKeyboardInput(deltaTime);
     ProcessMouseInput();
 
@@ -342,27 +488,27 @@ bool Renderer::Update()
     glDrawArrays(GL_TRIANGLES, 0, 6);
 
     glBindVertexArray(limbVAO);
-    for(const RenderLimb& limb : limbList){
-        model = glm::mat4(1.0f);
-        model = glm::translate(model, limb.root);
-        model *= glm::mat4_cast(limb.orientation);
-        model = glm::scale(model, {limb.radius, limb.length, limb.radius});
+    for(const RenderFrame::Plant& plant : plants){
+        const bool selected = selectedPlantId && plant.id == *selectedPlantId;
+        shader.SetInt("uUseUniformColor", selected ? 1 : 0);
+        if (selected)
+            shader.SetVec4("uColor", 0.25f, 1.0f, 0.35f, 1.0f);
 
-        // glm::vec3 dir = data.orientation * glm::vec3(1,0,0);
+        for (const RenderLimb& limb : plant.limbs)
+        {
+            model = glm::mat4(1.0f);
+            model = glm::translate(model, limb.root);
+            model *= glm::mat4_cast(limb.orientation);
+            model = glm::scale(model, {limb.radius, limb.length, limb.radius});
 
-        //     std::cout
-        //         << dir.x << " "
-        //         << dir.y << " "
-        //         << dir.z << std::endl;
-        
-        shader.SetMat4("uModel", glm::value_ptr(model));
-        glDrawElements(GL_TRIANGLES, limbvert, GL_UNSIGNED_INT, nullptr);
+            shader.SetMat4("uModel", glm::value_ptr(model));
+            glDrawElements(GL_TRIANGLES, limbvert, GL_UNSIGNED_INT, nullptr);
+        }
     }
-    limbList.clear();
+    shader.SetInt("uUseUniformColor", 0);
     glBindVertexArray(0);
 
     DrawDebugBoundingBoxes();
-    boundingBoxes.clear();
 
     DrawNeuralNetworkWindow();
     ImGui::Render();
@@ -469,6 +615,10 @@ void Renderer::DrawNeuralNetworkWindow()
 {
     ImGui::Begin("Neural network samples");
     ImGui::Text("Samples: %zu", neuralSamples.size());
+    if (selectedPlantId)
+        ImGui::Text("Selected plant: %u", *selectedPlantId);
+    else
+        ImGui::TextUnformatted("Selected plant: none");
 
     static const char* outputNames[] = {"elongate", "thicken", "root", "split", "reproduce"};
     static const char* inputNames[] = {"bias", "energy", "resource", "sun", "underground", "length", "torque", "age", "height"};
@@ -529,18 +679,29 @@ void Renderer::DrawNeuralNetworkWindow()
 
 void Renderer::DrawDebugBoundingBoxes()
 {
-    if (!debugBounds || boundingBoxes.empty())
+    if (plants.empty())
         return;
 
     shader.SetInt("uUseUniformColor", 1);
-    shader.SetVec4("uColor", 1.0f, 0.85f, 0.1f, 1.0f);
     shader.SetMat4("uModel", glm::value_ptr(glm::mat4(1.0f)));
 
     glBindVertexArray(boxVAO);
     glLineWidth(2.0f);
 
-    for (const auto& bounds : boundingBoxes)
+    for (const auto& plant : plants)
     {
+        const bool selected = selectedPlantId && plant.id == *selectedPlantId;
+        if (!debugBounds && !selected)
+            continue;
+
+        shader.SetVec4(
+            "uColor",
+            selected ? 0.2f : 1.0f,
+            selected ? 1.0f : 0.85f,
+            selected ? 0.3f : 0.1f,
+            1.0f);
+
+        const auto& bounds = plant.bounds;
         const glm::vec3& min = bounds.min;
         const glm::vec3& max = bounds.max;
 

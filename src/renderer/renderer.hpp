@@ -4,6 +4,7 @@
 #include <condition_variable>
 #include <mutex>
 #include <memory>
+#include <optional>
 #include <thread>
 #include <vector>
 
@@ -26,8 +27,14 @@ struct RenderLimb
 
 struct RenderFrame
 {
-    std::vector<RenderLimb> limbs;
-    std::vector<Organism::BoundingBox> boundingBoxes;
+    struct Plant
+    {
+        unsigned int id = 0;
+        Organism::BoundingBox bounds{};
+        std::vector<RenderLimb> limbs;
+    };
+
+    std::vector<Plant> plants;
     std::vector<Organism::NeuralNetworkSample> neuralSamples;
 };
 
@@ -41,10 +48,14 @@ public:
     void DrawBoundingBox(const Organism::BoundingBox& bounds);
     void SetFrame(RenderFrame frame);
     bool IsAlive() const;
+    void Zoom(float steps);
 
 private:
     void ProcessKeyboardInput(float deltaTime);
     void ProcessMouseInput();
+    void PickPlant(double mouseX, double mouseY);
+    bool RayIntersectsBounds(const glm::vec3& origin, const glm::vec3& direction, const Organism::BoundingBox& bounds, float& distance) const;
+    bool RayIntersectsLimb(const glm::vec3& origin, const glm::vec3& direction, const RenderLimb& limb, float& distance) const;
     void DrawDebugBoundingBoxes();
     void DrawNeuralNetworkWindow();
 
@@ -55,14 +66,13 @@ private:
     unsigned int limbVAO = 0;
     unsigned int limbVBO = 0;
     unsigned int limbEBO = 0;
-    std::vector<RenderLimb> limbList;
+    std::vector<RenderFrame::Plant> plants;
 
     unsigned int floorVAO = 0;
     unsigned int floorVBO = 0;
 
     unsigned int boxVAO = 0;
     unsigned int boxVBO = 0;
-    std::vector<Organism::BoundingBox> boundingBoxes;
     std::vector<Organism::NeuralNetworkSample> neuralSamples;
 
     Shader shader;
@@ -73,9 +83,13 @@ private:
     double lastMouseX = 400.0;
     double lastMouseY = 300.0;
     bool leftMouseDown = false;
+    bool leftMouseDragged = false;
+    double mouseDownX = 400.0;
+    double mouseDownY = 300.0;
     bool debugBounds = false;
     bool debugKeyWasDown = false;
     bool imguiInitialized = false;
+    std::optional<unsigned int> selectedPlantId;
 };
 
 class RenderPipeline
