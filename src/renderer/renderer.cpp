@@ -482,6 +482,11 @@ void Renderer::DrawNeuralNetworkWindow()
 
         ImGui::Text("age %.2f years   energy %.1f J", sample.ageYears, sample.energy);
         ImGui::Text("limbs %u   height %.2f m   resource %.2f", sample.stats.limbCount, sample.stats.maxHeight, sample.stats.resourceFactor);
+        ImGui::Text("root %.2f   hydraulic %.2f   xylem %.2f   embolism %.2f",
+            sample.stats.rootResourceFactor,
+            sample.stats.hydraulicResourceFactor,
+            sample.stats.xylemConductanceMultiplier,
+            sample.stats.embolismLossFraction);
         ImGui::Text("reproduce %.2f   split signals %u", sample.stats.reproductionPressure, sample.stats.splitSignals);
         ImGui::Text("photo %.1f J   transport %.1f J   respiration %.1f J   reserve %.1f J",
             sample.stats.photosynthesisEnergy,

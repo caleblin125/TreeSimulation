@@ -232,6 +232,38 @@ void TestMaintenanceAndReserveCosts()
     Expect(shortOrganism.GetLastStats().reserveDecayEnergy > 0.0, "stored energy reserve decays each step");
 }
 
+void TestXylemTradeoffs()
+{
+    Organism::Genome safeGenome;
+    safeGenome.seedInitialEnergy = 1'000'000.0;
+    safeGenome.branchSpawnEnergy = 1.0e12;
+    safeGenome.initialShootLength = 2.0f;
+    safeGenome.initialRootLength = 0.5f;
+    safeGenome.initialRadius = 0.05f;
+    safeGenome.woodDensity = 100.0;
+    safeGenome.bendingStrength = 1.0e12;
+    safeGenome.xylemConduitDiameterM = 20.0e-6;
+    safeGenome.xylemConductiveAreaFraction = 0.12;
+
+    Organism::Genome fastGenome = safeGenome;
+    fastGenome.xylemConduitDiameterM = 80.0e-6;
+
+    Organism safeOrganism(14, glm::vec3(0.0f), glm::identity<glm::quat>(), safeGenome);
+    Organism fastOrganism(15, glm::vec3(0.0f), glm::identity<glm::quat>(), fastGenome);
+    safeOrganism.Simulate(SimulationConstants::MaxStableStepYears);
+    fastOrganism.Simulate(SimulationConstants::MaxStableStepYears);
+
+    Expect(fastOrganism.GetLastStats().xylemConductanceMultiplier > safeOrganism.GetLastStats().xylemConductanceMultiplier, "wider xylem conduits increase hydraulic conductance");
+    Expect(fastOrganism.GetLastStats().embolismLossFraction > safeOrganism.GetLastStats().embolismLossFraction, "wider xylem conduits increase embolism loss");
+
+    Organism::Genome porousGenome = safeGenome;
+    porousGenome.xylemConductiveAreaFraction = 0.45;
+    Organism porousOrganism(16, glm::vec3(0.0f), glm::identity<glm::quat>(), porousGenome);
+    porousOrganism.Simulate(SimulationConstants::MaxStableStepYears);
+
+    Expect(porousOrganism.GetLastStats().effectiveBendingStrength < safeOrganism.GetLastStats().effectiveBendingStrength, "more conductive area leaves less fiber strength");
+}
+
 void TestDefaultProtoTreeSurvivesAsSimpleForm()
 {
     Organism organism(7, glm::vec3(0.0f), glm::identity<glm::quat>());
@@ -317,6 +349,8 @@ void TestGenomeMutationClamps()
     for (int i = 0; i < 100; ++i)
     {
         const Organism::Genome genome = parent.MakeMutatedGenome(rng);
+        Expect(genome.xylemConduitDiameterM >= 8.0e-6 && genome.xylemConduitDiameterM <= 160.0e-6, "mutated xylem conduit diameter stays clamped");
+        Expect(genome.xylemConductiveAreaFraction >= 0.03 && genome.xylemConductiveAreaFraction <= 0.55, "mutated xylem conductive fraction stays clamped");
         Expect(genome.seedEnergyCost >= SimulationConstants::InitialEnergyJ, "mutated seed cost keeps minimum reserve");
         Expect(genome.propaguleEstablishmentProbability >= 0.01 && genome.propaguleEstablishmentProbability <= 0.9, "mutated establishment probability stays clamped");
         Expect(genome.seedsPerReproduction >= 1 && genome.seedsPerReproduction <= 8, "mutated seeds per reproduction stays clamped");
@@ -384,6 +418,7 @@ int main()
     TestMonthlyGrowth();
     TestNutrientTransportCostScalesWithPathLength();
     TestMaintenanceAndReserveCosts();
+    TestXylemTradeoffs();
     TestDefaultProtoTreeSurvivesAsSimpleForm();
     TestDefaultProtoTreeSurvivesStableSubsteps();
     TestLimbBrainControlsSplitAndReproduction();

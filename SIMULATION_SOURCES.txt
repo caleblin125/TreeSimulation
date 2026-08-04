@@ -202,6 +202,48 @@ This makes roots gate photosynthesis, but it does not yet model root hairs,
 mycorrhizae, soil water potential, nitrogen/phosphorus availability, or hydraulic
 conductance.
 
+Xylem hydraulic and structural tradeoff
+---------------------------------------
+Values used:
+XylemReferenceConduitDiameterM = 40 micrometers.
+XylemReferenceConductiveAreaFraction = 0.18.
+XylemPathResistancePerMeter = 0.08.
+XylemBaseEmbolismLossFraction = 0.04.
+XylemConductiveAreaStrengthPenalty = 0.70.
+
+Sources:
+Gleason et al., "Weak tradeoff between xylem safety and xylem-specific hydraulic
+efficiency across the world's woody plant species", New Phytologist.
+https://sperry.biology.utah.edu/publications/Gleason2016.pdf
+
+Zheng and Martinez-Cabrera et al., "Wood anatomical correlates with theoretical
+conductivity and wood density across China: evolutionary evidence of the
+functional differentiation of axial and radial parenchyma", Annals of Botany /
+PMC.
+https://pmc.ncbi.nlm.nih.gov/articles/PMC3747806/
+
+Pratt et al., "Wood allocation trade-offs between fiber wall, fiber lumen, and
+axial parenchyma drive drought acclimation in a conifer", Plant, Cell &
+Environment / PMC.
+https://pmc.ncbi.nlm.nih.gov/articles/PMC7155043/
+
+Hacke, Sperry, Pockman, Davis, and McCulloh, "Trends in wood density and
+structure are linked to prevention of xylem implosion by negative pressure",
+Oecologia.
+https://doi.org/10.1007/s004420000589
+
+Reasoning: Water transport through an ideal conduit scales very strongly with
+diameter, so the sim uses conduitDiameter^4 as a first-order Hagen-Poiseuille
+proxy for flow capacity. That creates an efficiency benefit for wider xylem.
+The sim also applies a diameter-squared embolism loss term that increases with
+tree height/path tension, because wider conduits and larger connected vessels
+are generally more vulnerable to gas blockage, while acknowledging that pit
+structure, conduit position, vessel density, and network topology complicate the
+global safety-efficiency relationship. Conductive area fraction increases flow
+but reduces effective bending strength, representing cross-section allocated to
+conduits rather than supportive fiber wall. This is intentionally a trait-level
+evolutionary pressure, not a full water-potential or soil-moisture model.
+
 Genetic variation
 -----------------
 Each organism now carries a Genome struct containing heritable growth,

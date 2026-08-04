@@ -27,6 +27,19 @@ namespace SimulationConstants
     constexpr double EnergyReserveTurnoverFractionPerYear = 0.08;
     constexpr double NutrientTransportEnergyFractionPerMeter = 0.015;
 
+    // Xylem tradeoffs. Wider conduits and more conductive area improve flow, but
+    // reduce fiber support and increase embolism losses in this simplified model.
+    constexpr double XylemReferenceConduitDiameterM = 40.0e-6;
+    constexpr double XylemReferenceConductiveAreaFraction = 0.18;
+    constexpr double XylemMinConductanceMultiplier = 0.05;
+    constexpr double XylemMaxConductanceMultiplier = 8.0;
+    constexpr double XylemPathResistancePerMeter = 0.08;
+    constexpr double XylemBaseEmbolismLossFraction = 0.04;
+    constexpr double XylemHeightTensionMpaPerMeter = 0.00981;
+    constexpr double XylemEmbolismHeightScaleMpa = 0.25;
+    constexpr double XylemConductiveAreaStrengthPenalty = 0.70;
+    constexpr double XylemMinimumStrengthMultiplier = 0.20;
+
     // Growth/reproduction tuning, SI-ish but still simplified by the current tree model.
     constexpr double WoodConstructionEnergyJPerKg = 17.0e6;
     constexpr double GrowthReserveFraction = 0.35;

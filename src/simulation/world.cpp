@@ -243,6 +243,11 @@ void World::AccumulateStats(Organism::Stats& totals, const Organism::Stats& stat
     totals.rootGrowthCost += stats.rootGrowthCost;
     totals.fractureEnergyLoss += stats.fractureEnergyLoss;
     totals.resourceFactor += stats.resourceFactor;
+    totals.rootResourceFactor += stats.rootResourceFactor;
+    totals.hydraulicResourceFactor += stats.hydraulicResourceFactor;
+    totals.xylemConductanceMultiplier += stats.xylemConductanceMultiplier;
+    totals.embolismLossFraction += stats.embolismLossFraction;
+    totals.effectiveBendingStrength += stats.effectiveBendingStrength;
     totals.leafArea += stats.leafArea;
     totals.rootSurfaceArea += stats.rootSurfaceArea;
     totals.shootGrowthLength += stats.shootGrowthLength;
@@ -263,6 +268,11 @@ void World::PrintProfilingSummary(
 {
     const double sampleCount = std::max(1u, profileSamples);
     const double avgResourceFactor = totals.resourceFactor / sampleCount;
+    const double avgRootResourceFactor = totals.rootResourceFactor / sampleCount;
+    const double avgHydraulicResourceFactor = totals.hydraulicResourceFactor / sampleCount;
+    const double avgXylemConductance = totals.xylemConductanceMultiplier / sampleCount;
+    const double avgEmbolismLoss = totals.embolismLossFraction / sampleCount;
+    const double avgEffectiveBendingStrengthMpa = totals.effectiveBendingStrength / sampleCount / 1.0e6;
     const double avgEnergyStart = totals.energyStart / sampleCount;
     const double avgEnergyEnd = totals.energyEnd / sampleCount;
 
@@ -288,6 +298,11 @@ void World::PrintProfilingSummary(
         << " shootGrowM=" << totals.shootGrowthLength
         << " rootGrowM=" << totals.rootGrowthLength
         << " avgResource=" << avgResourceFactor
+        << " avgRootResource=" << avgRootResourceFactor
+        << " avgHydraulicResource=" << avgHydraulicResourceFactor
+        << " avgXylemK=" << avgXylemConductance
+        << " avgEmbolism=" << avgEmbolismLoss
+        << " avgBendMPa=" << avgEffectiveBendingStrengthMpa
         << " leafArea=" << totals.leafArea
         << " rootArea=" << totals.rootSurfaceArea
         << " fractureJ=" << totals.fractureEnergyLoss

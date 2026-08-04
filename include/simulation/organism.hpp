@@ -30,6 +30,8 @@ class Organism{
             double groundExtractionMultiplier = 1.0;
             double woodDensity = SimulationConstants::BranchWoodDensityKgPerM3;
             double bendingStrength = SimulationConstants::BranchBendingStrengthPa;
+            double xylemConduitDiameterM = SimulationConstants::XylemReferenceConduitDiameterM;
+            double xylemConductiveAreaFraction = SimulationConstants::XylemReferenceConductiveAreaFraction;
             double limbRadiusRatio = 0.05;
             double rootRadiusRatio = 0.02;
             double branchSpawnEnergy = SimulationConstants::BranchSpawnEnergyJ;
@@ -71,6 +73,11 @@ class Organism{
             double rootGrowthCost = 0.0;
             double fractureEnergyLoss = 0.0;
             double resourceFactor = 0.0;
+            double rootResourceFactor = 0.0;
+            double hydraulicResourceFactor = 0.0;
+            double xylemConductanceMultiplier = 0.0;
+            double embolismLossFraction = 0.0;
+            double effectiveBendingStrength = 0.0;
             double leafArea = 0.0;
             double rootSurfaceArea = 0.0;
             float shootGrowthLength = 0.0f;
@@ -136,6 +143,9 @@ class Organism{
         std::vector<LimbDecision> EvaluateGrowthBrains(const std::vector<std::shared_ptr<Limb>>& limbs, const std::vector<LimbLight>& limbLight) const;
         BrainOutput EvaluateGrowthBrain(const std::shared_ptr<Limb>& limb, double exposure) const;
         double SunExposure(const std::shared_ptr<Limb>& limb, const std::vector<std::shared_ptr<Limb>>& limbs) const;
+        double XylemConductanceMultiplier() const;
+        double XylemEmbolismLossFraction(double maxHeight, double maxNutrientPathLength) const;
+        double EffectiveBendingStrength() const;
 
         unsigned int id;
         Genome genome;

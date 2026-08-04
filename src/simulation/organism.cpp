@@ -59,20 +59,36 @@ bool Organism::Simulate(float dtYears)
 
     double rootSurfaceArea = 0.0;
     double leafArea = 0.0;
+    double maxNutrientPathLength = 0.0;
     for (const auto& limb : limbs)
     {
         rootSurfaceArea += limb->GroundExtractionArea();
         leafArea += limb->AboveGroundSurfaceArea() * genome.leafAreaMultiplier;
+        if (limb->CanPhotosynthesize())
+            maxNutrientPathLength = std::max(maxNutrientPathLength, limb->NutrientPathLength());
 
         lastStats.maxHeight = std::max(lastStats.maxHeight, limb->GetEnd().y);
     }
 
-    const double resourceFactor = leafArea <= 0.0
+    const double rootResourceFactor = leafArea <= 0.0
         ? 1.0
         : std::clamp(rootSurfaceArea * genome.rootSupportedLeafArea / leafArea, 0.0, 1.0);
+    const double xylemConductance = XylemConductanceMultiplier();
+    const double embolismLoss = XylemEmbolismLossFraction(lastStats.maxHeight, maxNutrientPathLength);
+    const double hydraulicPathPenalty = 1.0 + maxNutrientPathLength * SimulationConstants::XylemPathResistancePerMeter;
+    const double hydraulicLeafSupport = rootSurfaceArea * genome.rootSupportedLeafArea * xylemConductance * (1.0 - embolismLoss) / hydraulicPathPenalty;
+    const double hydraulicResourceFactor = leafArea <= 0.0
+        ? 1.0
+        : std::clamp(hydraulicLeafSupport / leafArea, 0.0, 1.0);
+    const double resourceFactor = std::min(rootResourceFactor, hydraulicResourceFactor);
     lastStats.rootSurfaceArea = rootSurfaceArea;
     lastStats.leafArea = leafArea;
     lastStats.resourceFactor = resourceFactor;
+    lastStats.rootResourceFactor = rootResourceFactor;
+    lastStats.hydraulicResourceFactor = hydraulicResourceFactor;
+    lastStats.xylemConductanceMultiplier = xylemConductance;
+    lastStats.embolismLossFraction = embolismLoss;
+    lastStats.effectiveBendingStrength = EffectiveBendingStrength();
     std::vector<LimbDecision> limbDecisions = EvaluateGrowthBrains(limbs, limbLight);
 
     const double activeSeconds = dtYears * SimulationConstants::SecondsPerYear * SimulationConstants::ActivePhotosynthesisFractionOfYear;
@@ -83,7 +99,8 @@ bool Organism::Simulate(float dtYears)
         const double fixedCo2 = SimulationConstants::MaxLeafAssimilationMolCo2PerM2Second * leafArea * lit.exposure * resourceFactor * activeSeconds;
         const double gainedEnergy = fixedCo2 * SimulationConstants::EnergyJPerMolCo2Fixed;
         const double transportDistance = lit.limb->NutrientPathLength();
-        const double transportEnergy = gainedEnergy * SimulationConstants::NutrientTransportEnergyFractionPerMeter * transportDistance;
+        const double transportQuality = std::max(SimulationConstants::XylemMinConductanceMultiplier, xylemConductance * (1.0 - embolismLoss));
+        const double transportEnergy = gainedEnergy * SimulationConstants::NutrientTransportEnergyFractionPerMeter * transportDistance / transportQuality;
         energy += gainedEnergy;
         energy -= transportEnergy;
         lastStats.photosynthesisEnergy += gainedEnergy;
@@ -265,7 +282,8 @@ bool Organism::Simulate(float dtYears)
     rootSystem->UpdatePose();
     core->UpdateWeight(genome.woodDensity);
     rootSystem->UpdateWeight(genome.woodDensity);
-    if (core->ExceedsStrength(genome.bendingStrength))
+    const double effectiveBendingStrength = EffectiveBendingStrength();
+    if (core->ExceedsStrength(effectiveBendingStrength))
     {
         const double energyLoss = SimulationConstants::FractureEnergyLossPerNewton * core->GetCarriedWeight();
         energy -= energyLoss;
@@ -278,7 +296,7 @@ bool Organism::Simulate(float dtYears)
         return alive;
     }
 
-    const double fractureEnergyLoss = core->PruneOverstressed(genome.bendingStrength);
+    const double fractureEnergyLoss = core->PruneOverstressed(effectiveBendingStrength);
     energy -= fractureEnergyLoss;
     lastStats.fractureEnergyLoss += fractureEnergyLoss;
     core->UpdateWeight(genome.woodDensity);
@@ -397,6 +415,8 @@ Organism::Genome Organism::MakeMutatedGenome(std::mt19937& randomGenerator) cons
     mutated.groundExtractionMultiplier = std::clamp(mutateDouble(mutated.groundExtractionMultiplier), 0.05, 20.0);
     mutated.woodDensity = std::clamp(mutateDouble(mutated.woodDensity), 100.0, 1200.0);
     mutated.bendingStrength = std::clamp(mutateDouble(mutated.bendingStrength), 5.0e6, 200.0e6);
+    mutated.xylemConduitDiameterM = std::clamp(mutateDouble(mutated.xylemConduitDiameterM), 8.0e-6, 160.0e-6);
+    mutated.xylemConductiveAreaFraction = std::clamp(mutateDouble(mutated.xylemConductiveAreaFraction), 0.03, 0.55);
     mutated.limbRadiusRatio = std::clamp(mutateDouble(mutated.limbRadiusRatio), 0.01, 0.2);
     mutated.rootRadiusRatio = std::clamp(mutateDouble(mutated.rootRadiusRatio), 0.005, 0.12);
     mutated.branchSpawnEnergy = std::clamp(mutateDouble(mutated.branchSpawnEnergy), 1000.0, 5.0e9);
@@ -471,7 +491,7 @@ Organism::BrainOutput Organism::EvaluateGrowthBrain(const std::shared_ptr<Limb>&
 {
     const double strength = limb->GetRadius() <= 0.0f
         ? 1.0
-        : Physics::BendingStrength(limb->GetRadius(), genome.bendingStrength);
+        : Physics::BendingStrength(limb->GetRadius(), EffectiveBendingStrength());
     const double torque = static_cast<double>(glm::length(limb->GetCarriedTorque()));
     const double torqueMargin = strength <= 0.0 ? 1.0 : std::clamp(1.0 - torque / strength, 0.0, 1.0);
     const double normalizedEnergy = std::clamp(energy / std::max(genome.minReproductionReserve, SimulationConstants::InitialEnergyJ), 0.0, 1.0);
@@ -548,4 +568,40 @@ double Organism::SunExposure(const std::shared_ptr<Limb>& limb, const std::vecto
     }
 
     return facing * (static_cast<double>(visible) / static_cast<double>(samples));
+}
+
+double Organism::XylemConductanceMultiplier() const
+{
+    const double diameterRatio = genome.xylemConduitDiameterM / SimulationConstants::XylemReferenceConduitDiameterM;
+    const double areaRatio = genome.xylemConductiveAreaFraction / SimulationConstants::XylemReferenceConductiveAreaFraction;
+    const double conductance = areaRatio * std::pow(std::max(0.0, diameterRatio), 4.0);
+    return std::clamp(
+        conductance,
+        SimulationConstants::XylemMinConductanceMultiplier,
+        SimulationConstants::XylemMaxConductanceMultiplier);
+}
+
+double Organism::XylemEmbolismLossFraction(double maxHeight, double maxNutrientPathLength) const
+{
+    const double diameterRatio = genome.xylemConduitDiameterM / SimulationConstants::XylemReferenceConduitDiameterM;
+    const double heightTension = std::max(0.0, maxHeight) * SimulationConstants::XylemHeightTensionMpaPerMeter;
+    const double pathTension = maxNutrientPathLength * SimulationConstants::XylemHeightTensionMpaPerMeter * 0.25;
+    const double tensionMultiplier = 1.0 + (heightTension + pathTension) / SimulationConstants::XylemEmbolismHeightScaleMpa;
+    const double loss = SimulationConstants::XylemBaseEmbolismLossFraction *
+        std::pow(std::max(0.0, diameterRatio), 2.0) *
+        tensionMultiplier;
+    return std::clamp(loss, 0.0, 0.90);
+}
+
+double Organism::EffectiveBendingStrength() const
+{
+    const double conductiveRatio = genome.xylemConductiveAreaFraction / SimulationConstants::XylemReferenceConductiveAreaFraction;
+    const double strengthMultiplier = 1.0 -
+        SimulationConstants::XylemConductiveAreaStrengthPenalty *
+        genome.xylemConductiveAreaFraction *
+        conductiveRatio;
+    return genome.bendingStrength * std::clamp(
+        strengthMultiplier,
+        SimulationConstants::XylemMinimumStrengthMultiplier,
+        1.0);
 }
