@@ -216,8 +216,27 @@ Values used:
 SoilCellSizeM = 2 m.
 SoilRecoveryPerYear = 0.12.
 SoilDepletionPerRootAreaYear = 0.35.
+DeadBiomassDecompositionRatePerYear = 0.25.
+SoilNutritionGainPerDetritusKg = 0.08.
 SoilCompetitionRadiusM = 2.5 m.
 SoilCompetitionPressureScale = 3.0.
+
+Sources:
+Long-Term Intersite Decomposition Experiment Team (LIDET), methods and
+publication list.
+https://andrewsforest.oregonstate.edu/pubs/webdocs/reports/lidet/lidet_meth/lidet.htm
+https://andrewsforest.oregonstate.edu/sites/default/files/lter/pubs/webdocs/reports/lidet/pub_list.htm
+
+Parton et al., "Global-Scale Similarities in Nitrogen Release Patterns During
+Long-Term Decomposition", Science.
+https://www.uvm.edu/giee/pubpdfs/Parton_2007_Science.pdf
+
+Harmon et al., "Long-term patterns of mass loss during the decomposition of leaf
+and fine root litter", US Forest Service PDF.
+https://research.fs.usda.gov/download/treesearch/36546.pdf
+
+Krishna and Mohan, "Litter decomposition in forest ecosystems: a review".
+https://link.springer.com/article/10.1007/s40974-017-0064-9
 
 Reasoning: This is a coarse competition model rather than a researched soil
 chemistry model. Each occupied soil cell stores a normalized resource level from
@@ -229,6 +248,16 @@ the local soil resource, so seeds landing in exhausted patches are less likely
 to become plants. This should discourage persistent clumping without yet
 simulating separate water, nitrogen, phosphorus, microbial communities, or
 diffusion between cells.
+
+Dead plants now add their estimated woody biomass into a soil detritus pool. The
+detritus pool decomposes with first-order decay and gradually raises normalized
+soil nutrition. A rate of 0.25/year is deliberately slower than typical leaf
+litter k values because the current organism body is modeled as woody cylinders,
+not leaves/fine litter. The nutrition gain per kg is a tuning coefficient for
+the normalized soil resource, not a direct N/P mass conversion. A more accurate
+future model should split dead tissue into leaves, fine roots, coarse roots,
+sapwood, heartwood, and reproductive litter with separate decomposition and
+nutrient-release curves.
 
 Sunlight competition / occlusion
 --------------------------------

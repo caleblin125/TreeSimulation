@@ -255,6 +255,7 @@ void World::SimulateSubstep(
             if (stats.diedFromCoreFracture)
                 coreFractureDeaths++;
 
+            AddDeadPlantDetritus(o->GetRootPosition(), stats.biomassKg);
             o.reset();
             continue;
         }
@@ -336,7 +337,7 @@ std::vector<World::SoilSample> World::GetSoilSamples() const
         const auto unsignedKey = static_cast<std::uint64_t>(key);
         const auto cellX = static_cast<std::int32_t>(static_cast<std::uint32_t>(unsignedKey >> 32));
         const auto cellZ = static_cast<std::int32_t>(static_cast<std::uint32_t>(unsignedKey & 0xffffffffULL));
-        ret.push_back({cellX, cellZ, cell.resource});
+        ret.push_back({cellX, cellZ, cell.resource, cell.detritusKg});
     }
     return ret;
 }
@@ -437,9 +438,13 @@ void World::RecoverSoil(float dtYears)
     for (auto it = soilCells.begin(); it != soilCells.end();)
     {
         SoilCell& cell = it->second;
+        const double decomposedKg = cell.detritusKg *
+            (1.0 - std::exp(-SimulationConstants::DeadBiomassDecompositionRatePerYear * dtYears));
+        cell.detritusKg = std::max(0.0, cell.detritusKg - decomposedKg);
+        cell.resource += decomposedKg * SimulationConstants::SoilNutritionGainPerDetritusKg;
         cell.resource += (1.0 - cell.resource) * SimulationConstants::SoilRecoveryPerYear * dtYears;
         cell.resource = std::clamp(cell.resource, 0.0, 1.0);
-        if (cell.resource >= 0.999)
+        if (cell.resource >= 0.999 && cell.detritusKg <= 1.0e-6)
             it = soilCells.erase(it);
         else
             ++it;
@@ -451,6 +456,15 @@ void World::DepleteSoil(glm::vec3 position, double rootSurfaceArea, float dtYear
     SoilCell& cell = soilCells[SoilKey(position)];
     cell.resource -= rootSurfaceArea * SimulationConstants::SoilDepletionPerRootAreaYear * dtYears;
     cell.resource = std::clamp(cell.resource, 0.0, 1.0);
+}
+
+void World::AddDeadPlantDetritus(glm::vec3 position, double biomassKg)
+{
+    if (biomassKg <= 0.0)
+        return;
+
+    SoilCell& cell = soilCells[SoilKey(position)];
+    cell.detritusKg += biomassKg;
 }
 
 long long World::SoilKey(glm::vec3 position) const

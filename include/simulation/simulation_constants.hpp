@@ -79,6 +79,8 @@ namespace SimulationConstants
     constexpr float SoilCellSizeM = 2.0f;
     constexpr double SoilRecoveryPerYear = 0.12;
     constexpr double SoilDepletionPerRootAreaYear = 0.35;
+    constexpr double DeadBiomassDecompositionRatePerYear = 0.25;
+    constexpr double SoilNutritionGainPerDetritusKg = 0.08;
     constexpr float SoilCompetitionRadiusM = 2.5f;
     constexpr double SoilCompetitionPressureScale = 3.0;
     constexpr float SunOcclusionQueryPaddingM = 12.0f;

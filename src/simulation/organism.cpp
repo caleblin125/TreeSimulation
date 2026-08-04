@@ -64,11 +64,13 @@ bool Organism::Simulate(float dtYears, const Environment& environment)
 
     double rootSurfaceArea = 0.0;
     double leafArea = 0.0;
+    double biomassKg = 0.0;
     double maxNutrientPathLength = 0.0;
     for (const auto& limb : limbs)
     {
         rootSurfaceArea += limb->GroundExtractionArea();
         leafArea += limb->AboveGroundSurfaceArea() * genome.leafAreaMultiplier;
+        biomassKg += Geometry::CylinderVolume(limb->GetRadius(), limb->GetLength()) * genome.woodDensity;
         if (limb->CanPhotosynthesize())
             maxNutrientPathLength = std::max(maxNutrientPathLength, limb->NutrientPathLength());
 
@@ -88,6 +90,7 @@ bool Organism::Simulate(float dtYears, const Environment& environment)
         : std::clamp(hydraulicLeafSupport / leafArea, 0.0, 1.0);
     const double resourceFactor = std::min(rootResourceFactor, hydraulicResourceFactor);
     lastStats.rootSurfaceArea = rootSurfaceArea;
+    lastStats.biomassKg = biomassKg;
     lastStats.leafArea = leafArea;
     lastStats.resourceFactor = resourceFactor;
     lastStats.rootResourceFactor = rootResourceFactor;

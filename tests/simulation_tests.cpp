@@ -243,6 +243,7 @@ void TestMaintenanceAndReserveCosts()
 
     Expect(shortOrganism.GetLastStats().respirationEnergy > 0.0, "woody maintenance respiration is charged");
     Expect(bulkyOrganism.GetLastStats().respirationEnergy > shortOrganism.GetLastStats().respirationEnergy, "larger woody volume costs more maintenance respiration");
+    Expect(bulkyOrganism.GetLastStats().biomassKg > shortOrganism.GetLastStats().biomassKg, "larger woody volume has more live biomass");
     Expect(shortOrganism.GetLastStats().reserveDecayEnergy > 0.0, "stored energy reserve decays each step");
 }
 
@@ -522,6 +523,35 @@ void TestSoilRecoversAfterRootsLeave()
     Expect(recoveredSoil > depletedSoil, "soil nutrition replenishes after roots leave");
 }
 
+void TestDeadPlantsBecomeSoilDetritus()
+{
+    Organism::Genome genome;
+    genome.seedInitialEnergy = 1.0;
+    genome.initialShootLength = 0.5f;
+    genome.initialRootLength = 2.0f;
+    genome.initialRadius = 0.2f;
+    genome.leafAreaMultiplier = 0.0;
+    genome.branchSpawnEnergy = 1.0e12;
+
+    World world;
+    world.MakeOrganism(glm::vec3(0.0f), glm::identity<glm::quat>(), genome);
+    for (int step = 0; step < 240 && world.GetOrganismCount() > 0; ++step)
+        world.Simulate(SimulationConstants::MaxStableStepYears);
+
+    const double depletedSoil = world.GetSoilResourceAt(glm::vec3(0.0f));
+    const std::vector<World::SoilSample> afterDeathSamples = world.GetSoilSamples();
+    const auto detritusSample = std::find_if(afterDeathSamples.begin(), afterDeathSamples.end(), [](const World::SoilSample& sample)
+    {
+        return sample.detritusKg > 0.0;
+    });
+
+    Expect(detritusSample != afterDeathSamples.end(), "dead plant biomass is stored as soil detritus");
+
+    world.Simulate(5.0f);
+    const double replenishedSoil = world.GetSoilResourceAt(glm::vec3(0.0f));
+    Expect(replenishedSoil > depletedSoil, "dead plant detritus replenishes soil nutrition over time");
+}
+
 void TestExternalSunlightOcclusionReducesPhotosynthesis()
 {
     Organism::Genome targetGenome;
@@ -582,6 +612,7 @@ int main()
     TestWorldInitialOrganismsSurviveFirstMonth();
     TestSoilDepletionAndCompetition();
     TestSoilRecoversAfterRootsLeave();
+    TestDeadPlantsBecomeSoilDetritus();
     TestExternalSunlightOcclusionReducesPhotosynthesis();
 
     if (failures > 0)

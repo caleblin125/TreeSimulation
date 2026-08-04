@@ -42,6 +42,7 @@ struct RenderFrame
         int cellX = 0;
         int cellZ = 0;
         float resource = 1.0f;
+        float detritusKg = 0.0f;
     };
 
     std::vector<Plant> plants;

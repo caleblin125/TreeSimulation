@@ -29,6 +29,7 @@ public:
         std::int32_t cellX = 0;
         std::int32_t cellZ = 0;
         double resource = 1.0;
+        double detritusKg = 0.0;
     };
 
     std::size_t GetOrganismCount() const;
@@ -52,6 +53,7 @@ private:
     struct SoilCell
     {
         double resource = 1.0;
+        double detritusKg = 0.0;
     };
 
     void SpawnPropagules(const glm::vec3& origin, unsigned int count, Organism& parent);
@@ -70,6 +72,7 @@ private:
     static void AccumulateStats(Organism::Stats& totals, const Organism::Stats& stats);
     void RecoverSoil(float dtYears);
     void DepleteSoil(glm::vec3 position, double rootSurfaceArea, float dtYears);
+    void AddDeadPlantDetritus(glm::vec3 position, double biomassKg);
     long long SoilKey(glm::vec3 position) const;
     void PrintProfilingSummary(
         unsigned int organismsBefore,

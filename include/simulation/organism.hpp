@@ -83,6 +83,7 @@ class Organism{
             double effectiveBendingStrength = 0.0;
             double leafArea = 0.0;
             double rootSurfaceArea = 0.0;
+            double biomassKg = 0.0;
             float shootGrowthLength = 0.0f;
             float rootGrowthLength = 0.0f;
             float maxHeight = 0.0f;

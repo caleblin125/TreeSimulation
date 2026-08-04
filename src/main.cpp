@@ -48,7 +48,8 @@ RenderFrame BuildRenderFrame(World& world, std::size_t& limbCount)
         frame.soilCells.push_back({
             sample.cellX,
             sample.cellZ,
-            static_cast<float>(std::clamp(sample.resource, 0.0, 1.0))
+            static_cast<float>(std::clamp(sample.resource, 0.0, 1.0)),
+            static_cast<float>(std::max(0.0, sample.detritusKg))
         });
     }
 

@@ -798,6 +798,7 @@ void Renderer::DrawSelectedPlantWindow()
     ImGui::Text("energy %.1f J   start %.1f J   alive %s", plant->energy, stats.energyStart, stats.alive ? "yes" : "no");
     ImGui::Separator();
     ImGui::Text("height %.2f m   leaf %.3f m2   root %.3f m2", stats.maxHeight, stats.leafArea, stats.rootSurfaceArea);
+    ImGui::Text("biomass %.3f kg", stats.biomassKg);
     ImGui::Text("resource %.2f   soil %.2f   root %.2f   hydraulic %.2f",
         stats.resourceFactor,
         stats.soilResourceFactor,
