@@ -202,6 +202,37 @@ This makes roots gate photosynthesis, but it does not yet model root hairs,
 mycorrhizae, soil water potential, nitrogen/phosphorus availability, or hydraulic
 conductance.
 
+Soil depletion and competition
+------------------------------
+Values used:
+SoilCellSizeM = 2 m.
+SoilRecoveryPerYear = 0.12.
+SoilDepletionPerRootAreaYear = 0.35.
+SoilCompetitionRadiusM = 2.5 m.
+SoilCompetitionPressureScale = 3.0.
+
+Reasoning: This is a coarse competition model rather than a researched soil
+chemistry model. Each occupied soil cell stores a normalized resource level from
+0 to 1. Root surface area depletes the local cell over time, while depleted
+cells slowly recover. Neighboring roots add instantaneous competition pressure
+inside a small radius, reducing the soil factor passed into root-supported
+photosynthesis and hydraulic support. Propagule establishment is also scaled by
+the local soil resource, so seeds landing in exhausted patches are less likely
+to become plants. This should discourage persistent clumping without yet
+simulating separate water, nitrogen, phosphorus, microbial communities, or
+diffusion between cells.
+
+Sunlight competition / occlusion
+--------------------------------
+Value used: ExternalLimbShadeTransmission = 0.35.
+
+Reasoning: The world now gives each organism nearby external limb candidates
+from a quadtree broad phase. The organism's existing ray-sampled limb sunlight
+model checks those candidates in addition to self-occlusion. External limb
+occlusion transmits 35% of the sample's light instead of blocking all of it,
+roughly representing partial canopy transmission before explicit leaves and
+leaf density are modeled.
+
 Xylem hydraulic and structural tradeoff
 ---------------------------------------
 Values used:
@@ -255,8 +286,9 @@ Major known simplifications
 ---------------------------
 1. There are no explicit leaves. Photosynthesis is estimated from branch surface
    area times an artificial leaf-area multiplier.
-2. Roots are simple downward limbs. There is no branching root architecture,
-   root hairs, soil, water storage, nutrient pools, hydraulic limits, or drought.
+2. Soil is a normalized grid resource with local depletion and recovery, not
+   explicit water, nitrogen, phosphorus, diffusion, pH, microbes, or drought.
+   Roots are still simple downward limbs without root hairs or mycorrhizae.
 3. Branch strength ignores taper, knots, reaction wood, branch collars, and wind.
 4. The torque model uses static gravity only; no dynamic loads or self-collision.
 5. Energy is a single organism-wide pool, not local carbohydrate transport.

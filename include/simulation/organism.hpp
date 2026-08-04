@@ -75,6 +75,9 @@ class Organism{
             double resourceFactor = 0.0;
             double rootResourceFactor = 0.0;
             double hydraulicResourceFactor = 0.0;
+            double soilResourceFactor = 1.0;
+            double soilCompetitionPressure = 0.0;
+            double sunlightOcclusionPressure = 0.0;
             double xylemConductanceMultiplier = 0.0;
             double embolismLossFraction = 0.0;
             double effectiveBendingStrength = 0.0;
@@ -91,6 +94,13 @@ class Organism{
             bool alive = true;
         };
 
+        struct Environment
+        {
+            double soilResourceFactor = 1.0;
+            double soilCompetitionPressure = 0.0;
+            std::vector<std::shared_ptr<Limb>> sunlightOccluders;
+        };
+
         struct NeuralNetworkSample
         {
             unsigned int id = 0;
@@ -103,12 +113,15 @@ class Organism{
         Organism(unsigned int id, glm::vec3 root, glm::quat orientation);
         Organism(unsigned int id, glm::vec3 root, glm::quat orientation, Genome genome);
         bool Simulate(float dt);
+        bool Simulate(float dt, const Environment& environment);
         bool IsAlive(){
             return alive;
         }
 
         std::vector<std::weak_ptr<Limb>> GetLimbs();
         BoundingBox GetBoundingBox();
+        glm::vec3 GetRootPosition() const;
+        double EstimateRootSurfaceArea();
         glm::vec3 GetSeedOrigin();
         bool TryReproduce(unsigned int seedCount, double dtYears);
         const Genome& GetGenome() const;
@@ -140,10 +153,10 @@ class Organism{
         };
 
         std::vector<std::shared_ptr<Limb>> CollectLimbs();
-        std::vector<LimbLight> CalculateSunlight(const std::vector<std::shared_ptr<Limb>>& limbs) const;
+        std::vector<LimbLight> CalculateSunlight(const std::vector<std::shared_ptr<Limb>>& limbs, const Environment& environment);
         std::vector<LimbDecision> EvaluateGrowthBrains(const std::vector<std::shared_ptr<Limb>>& limbs, const std::vector<LimbLight>& limbLight) const;
         BrainOutput EvaluateGrowthBrain(const std::shared_ptr<Limb>& limb, double exposure) const;
-        double SunExposure(const std::shared_ptr<Limb>& limb, const std::vector<std::shared_ptr<Limb>>& limbs) const;
+        double SunExposure(const std::shared_ptr<Limb>& limb, const std::vector<std::shared_ptr<Limb>>& limbs, const Environment& environment);
         double XylemConductanceMultiplier() const;
         double XylemEmbolismLossFraction(double maxHeight, double maxNutrientPathLength) const;
         double EffectiveBendingStrength() const;

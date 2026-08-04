@@ -35,6 +35,11 @@ Organism::Organism(unsigned int id, glm::vec3 root, glm::quat orientation, Genom
 
 bool Organism::Simulate(float dtYears)
 {
+    return Simulate(dtYears, Environment{});
+}
+
+bool Organism::Simulate(float dtYears, const Environment& environment)
+{
     lastStats = {};
     lastStats.id = id;
     lastStats.energyStart = energy;
@@ -54,7 +59,7 @@ bool Organism::Simulate(float dtYears)
     core->UpdateWeight(genome.woodDensity);
     rootSystem->UpdateWeight(genome.woodDensity);
     std::vector<std::shared_ptr<Limb>> limbs = CollectLimbs();
-    std::vector<LimbLight> limbLight = CalculateSunlight(limbs);
+    std::vector<LimbLight> limbLight = CalculateSunlight(limbs, environment);
     lastStats.limbCount = static_cast<unsigned int>(limbs.size());
 
     double rootSurfaceArea = 0.0;
@@ -70,13 +75,14 @@ bool Organism::Simulate(float dtYears)
         lastStats.maxHeight = std::max(lastStats.maxHeight, limb->GetEnd().y);
     }
 
+    const double soilResourceFactor = std::clamp(environment.soilResourceFactor, 0.0, 1.0);
     const double rootResourceFactor = leafArea <= 0.0
         ? 1.0
-        : std::clamp(rootSurfaceArea * genome.rootSupportedLeafArea / leafArea, 0.0, 1.0);
+        : std::clamp(rootSurfaceArea * genome.rootSupportedLeafArea * soilResourceFactor / leafArea, 0.0, 1.0);
     const double xylemConductance = XylemConductanceMultiplier();
     const double embolismLoss = XylemEmbolismLossFraction(lastStats.maxHeight, maxNutrientPathLength);
     const double hydraulicPathPenalty = 1.0 + maxNutrientPathLength * SimulationConstants::XylemPathResistancePerMeter;
-    const double hydraulicLeafSupport = rootSurfaceArea * genome.rootSupportedLeafArea * xylemConductance * (1.0 - embolismLoss) / hydraulicPathPenalty;
+    const double hydraulicLeafSupport = rootSurfaceArea * genome.rootSupportedLeafArea * soilResourceFactor * xylemConductance * (1.0 - embolismLoss) / hydraulicPathPenalty;
     const double hydraulicResourceFactor = leafArea <= 0.0
         ? 1.0
         : std::clamp(hydraulicLeafSupport / leafArea, 0.0, 1.0);
@@ -86,6 +92,8 @@ bool Organism::Simulate(float dtYears)
     lastStats.resourceFactor = resourceFactor;
     lastStats.rootResourceFactor = rootResourceFactor;
     lastStats.hydraulicResourceFactor = hydraulicResourceFactor;
+    lastStats.soilResourceFactor = soilResourceFactor;
+    lastStats.soilCompetitionPressure = environment.soilCompetitionPressure;
     lastStats.xylemConductanceMultiplier = xylemConductance;
     lastStats.embolismLossFraction = embolismLoss;
     lastStats.effectiveBendingStrength = EffectiveBendingStrength();
@@ -355,6 +363,24 @@ Organism::BoundingBox Organism::GetBoundingBox()
     return bounds;
 }
 
+glm::vec3 Organism::GetRootPosition() const
+{
+    return rootSystem ? rootSystem->GetRoot() : glm::vec3(0.0f);
+}
+
+double Organism::EstimateRootSurfaceArea()
+{
+    if (!core || !rootSystem)
+        return 0.0;
+
+    core->UpdatePose();
+    rootSystem->UpdatePose();
+    double rootSurfaceArea = 0.0;
+    for (const auto& limb : CollectLimbs())
+        rootSurfaceArea += limb->GroundExtractionArea();
+    return rootSurfaceArea;
+}
+
 glm::vec3 Organism::GetSeedOrigin()
 {
     const BoundingBox bounds = GetBoundingBox();
@@ -468,14 +494,14 @@ std::vector<std::shared_ptr<Limb>> Organism::CollectLimbs()
     return ret;
 }
 
-std::vector<Organism::LimbLight> Organism::CalculateSunlight(const std::vector<std::shared_ptr<Limb>>& limbs) const
+std::vector<Organism::LimbLight> Organism::CalculateSunlight(const std::vector<std::shared_ptr<Limb>>& limbs, const Environment& environment)
 {
     std::vector<LimbLight> ret;
     ret.reserve(limbs.size());
     for (const auto& limb : limbs)
     {
         if (limb->CanPhotosynthesize())
-            ret.push_back({limb, SunExposure(limb, limbs)});
+            ret.push_back({limb, SunExposure(limb, limbs, environment)});
     }
     return ret;
 }
@@ -551,19 +577,21 @@ Organism::BrainOutput Organism::EvaluateGrowthBrain(const std::shared_ptr<Limb>&
     return output;
 }
 
-double Organism::SunExposure(const std::shared_ptr<Limb>& limb, const std::vector<std::shared_ptr<Limb>>& limbs) const
+double Organism::SunExposure(const std::shared_ptr<Limb>& limb, const std::vector<std::shared_ptr<Limb>>& limbs, const Environment& environment)
 {
     const glm::vec3 sunDirection = glm::normalize(glm::vec3(-0.35f, 1.0f, -0.2f));
     const glm::vec3 axis = glm::normalize(limb->GetEnd() - limb->GetRoot() + glm::vec3(0.0f, 0.0001f, 0.0f));
     const double facing = std::clamp(1.0 - std::abs(static_cast<double>(glm::dot(axis, sunDirection))) * 0.85, 0.15, 1.0);
 
     constexpr int samples = 7;
-    int visible = 0;
+    double visible = 0.0;
+    int externalOcclusions = 0;
     for (int i = 0; i < samples; ++i)
     {
         const float t = (static_cast<float>(i) + 0.5f) / static_cast<float>(samples);
         const glm::vec3 sample = glm::mix(limb->GetRoot(), limb->GetEnd(), t);
-        bool occluded = false;
+        bool selfOccluded = false;
+        bool externallyOccluded = false;
 
         for (const auto& blocker : limbs)
         {
@@ -572,16 +600,33 @@ double Organism::SunExposure(const std::shared_ptr<Limb>& limb, const std::vecto
 
             if (blocker->RayIntersects(sample, sunDirection))
             {
-                occluded = true;
+                selfOccluded = true;
                 break;
             }
         }
 
-        if (!occluded)
-            visible++;
+        if (!selfOccluded)
+        {
+            for (const auto& blocker : environment.sunlightOccluders)
+            {
+                if (!blocker || blocker == limb)
+                    continue;
+
+                if (blocker->RayIntersects(sample, sunDirection))
+                {
+                    externallyOccluded = true;
+                    externalOcclusions++;
+                    break;
+                }
+            }
+        }
+
+        if (!selfOccluded)
+            visible += externallyOccluded ? SimulationConstants::ExternalLimbShadeTransmission : 1.0;
     }
 
-    return facing * (static_cast<double>(visible) / static_cast<double>(samples));
+    lastStats.sunlightOcclusionPressure += static_cast<double>(externalOcclusions) / static_cast<double>(samples);
+    return facing * (visible / static_cast<double>(samples));
 }
 
 double Organism::XylemConductanceMultiplier() const

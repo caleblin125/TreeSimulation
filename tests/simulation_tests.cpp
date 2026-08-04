@@ -1,6 +1,7 @@
 #include "simulation/geometry.hpp"
 #include "simulation/organism.hpp"
 #include "simulation/physics.hpp"
+#include "simulation/quadtree.hpp"
 #include "simulation/simulation_constants.hpp"
 #include "simulation/world.hpp"
 
@@ -115,6 +116,19 @@ void TestPhysics()
         30'000'000.0 * Physics::CircularSectionModulus(0.2f) * SimulationConstants::StructuralSafetyFactor,
         1.0e-6,
         "bending strength");
+}
+
+void TestQuadtreeQueriesIntersectingItems()
+{
+    Spatial::Quadtree tree({-10.0f, -10.0f, 10.0f, 10.0f}, 1, 4);
+    tree.Insert({-2.0f, -2.0f, -1.0f, -1.0f}, 1);
+    tree.Insert({4.0f, 4.0f, 5.0f, 5.0f}, 2);
+    tree.Insert({-0.5f, -0.5f, 0.5f, 0.5f}, 3);
+
+    const std::vector<std::size_t> nearby = tree.Query({-3.0f, -3.0f, 0.0f, 0.0f});
+    Expect(std::find(nearby.begin(), nearby.end(), 1) != nearby.end(), "quadtree returns intersecting item in query range");
+    Expect(std::find(nearby.begin(), nearby.end(), 3) != nearby.end(), "quadtree returns centered item in query range");
+    Expect(std::find(nearby.begin(), nearby.end(), 2) == nearby.end(), "quadtree excludes distant item");
 }
 
 void TestLimbSurfaceResourceAccounting()
@@ -454,12 +468,74 @@ void TestWorldInitialOrganismsSurviveFirstMonth()
     Expect(world.GetOrganismCount() == 15, "starting proto-trees survive the first world month");
     Expect(world.GetLimbs().size() >= 30, "starting proto-tree limbs remain after the first world month");
 }
+
+void TestSoilDepletionAndCompetition()
+{
+    Organism::Genome genome;
+    genome.seedInitialEnergy = 1'000'000.0;
+    genome.initialShootLength = 0.5f;
+    genome.initialRootLength = 0.5f;
+    genome.initialRadius = 0.05f;
+    genome.branchSpawnEnergy = 1.0e12;
+    genome.bendingStrength = 1.0e12;
+    genome.woodDensity = 100.0;
+
+    World world;
+    world.MakeOrganism(glm::vec3(0.0f), glm::identity<glm::quat>(), genome);
+    world.MakeOrganism(glm::vec3(0.4f, 0.0f, 0.0f), glm::identity<glm::quat>(), genome);
+
+    const double soilBefore = world.GetSoilResourceAt(glm::vec3(0.0f));
+    world.Simulate(SimulationConstants::MaxStableStepYears);
+    const double soilAfter = world.GetSoilResourceAt(glm::vec3(0.0f));
+    const std::vector<Organism::NeuralNetworkSample> samples = world.GetNeuralNetworkSamples(2);
+
+    Expect(soilAfter < soilBefore, "root uptake depletes local soil resource");
+    Expect(samples.size() == 2, "competition test keeps both organisms alive");
+    Expect(samples[0].stats.soilCompetitionPressure > 0.0 || samples[1].stats.soilCompetitionPressure > 0.0, "nearby roots create soil competition pressure");
+    Expect(samples[0].stats.soilResourceFactor < 1.0 || samples[1].stats.soilResourceFactor < 1.0, "soil competition reduces resource factor");
+}
+
+void TestExternalSunlightOcclusionReducesPhotosynthesis()
+{
+    Organism::Genome targetGenome;
+    targetGenome.seedInitialEnergy = 1'000'000.0;
+    targetGenome.initialShootLength = 1.0f;
+    targetGenome.initialRootLength = 0.5f;
+    targetGenome.initialRadius = 0.05f;
+    targetGenome.shootGrowthRate = 0.0;
+    targetGenome.rootGrowthRate = 0.0;
+    targetGenome.branchSpawnEnergy = 1.0e12;
+    targetGenome.bendingStrength = 1.0e12;
+
+    Organism unshaded(19, glm::vec3(0.0f), glm::identity<glm::quat>(), targetGenome);
+    Organism shaded(20, glm::vec3(0.0f), glm::identity<glm::quat>(), targetGenome);
+
+    Organism::Genome blockerGenome = targetGenome;
+    blockerGenome.initialShootLength = 2.0f;
+    blockerGenome.initialRadius = 0.3f;
+    const glm::vec3 blockerPosition(-0.16f, 0.0f, -0.09f);
+    Organism blocker(21, blockerPosition, glm::identity<glm::quat>(), blockerGenome);
+
+    Organism::Environment environment;
+    for (const std::weak_ptr<Limb>& weakLimb : blocker.GetLimbs())
+    {
+        if (const std::shared_ptr<Limb> limb = weakLimb.lock())
+            environment.sunlightOccluders.push_back(limb);
+    }
+
+    unshaded.Simulate(SimulationConstants::MaxStableStepYears);
+    shaded.Simulate(SimulationConstants::MaxStableStepYears, environment);
+
+    Expect(shaded.GetLastStats().sunlightOcclusionPressure > 0.0, "external limbs are counted as sunlight occluders");
+    Expect(shaded.GetLastStats().photosynthesisEnergy < unshaded.GetLastStats().photosynthesisEnergy, "external occlusion reduces photosynthesis");
+}
 }
 
 int main()
 {
     TestGeometry();
     TestPhysics();
+    TestQuadtreeQueriesIntersectingItems();
     TestLimbSurfaceResourceAccounting();
     TestLimbNutrientPathLength();
     TestInitialRootAndBounds();
@@ -477,6 +553,8 @@ int main()
     TestPropaguleEstablishment();
     TestWorldInitialOrganismsHaveLimbs();
     TestWorldInitialOrganismsSurviveFirstMonth();
+    TestSoilDepletionAndCompetition();
+    TestExternalSunlightOcclusionReducesPhotosynthesis();
 
     if (failures > 0)
     {

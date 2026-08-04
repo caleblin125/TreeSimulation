@@ -4,6 +4,7 @@
 #include <memory>
 
 #include <random>
+#include <unordered_map>
 #include <vector>
 
 #include <glm/glm.hpp>
@@ -24,6 +25,7 @@ public:
 
     std::size_t GetOrganismCount() const;
     std::size_t GetPropaguleCount() const;
+    double GetSoilResourceAt(glm::vec3 position) const;
     std::vector<std::weak_ptr<Limb>> GetLimbs();
     std::vector<Organism::BoundingBox> GetBoundingBoxes();
     std::vector<Organism::NeuralNetworkSample> GetNeuralNetworkSamples(std::size_t maxSamples) const;
@@ -35,6 +37,11 @@ private:
         float age;
         float establishmentTime;
         Organism::Genome genome;
+    };
+
+    struct SoilCell
+    {
+        double resource = 1.0;
     };
 
     void SpawnPropagules(const glm::vec3& origin, unsigned int count, Organism& parent);
@@ -51,6 +58,9 @@ private:
         float& maxHeight,
         bool finalSubstep);
     static void AccumulateStats(Organism::Stats& totals, const Organism::Stats& stats);
+    void RecoverSoil(float dtYears);
+    void DepleteSoil(glm::vec3 position, double rootSurfaceArea, float dtYears);
+    long long SoilKey(glm::vec3 position) const;
     void PrintProfilingSummary(
         unsigned int organismsBefore,
         unsigned int organismsAfter,
@@ -69,4 +79,5 @@ private:
     std::mt19937 randomGenerator;
     std::vector<std::unique_ptr<Organism>> organisms;
     std::vector<Propagule> propagules;
+    std::unordered_map<long long, SoilCell> soilCells;
 };

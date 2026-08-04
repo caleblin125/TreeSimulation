@@ -76,6 +76,13 @@ namespace SimulationConstants
     constexpr float InitialRootLengthM = 0.08f;
     constexpr float InitialSeedlingRadiusM = 0.004f;
     constexpr double RootSupportedLeafAreaPerRootArea = 20.0;
+    constexpr float SoilCellSizeM = 2.0f;
+    constexpr double SoilRecoveryPerYear = 0.12;
+    constexpr double SoilDepletionPerRootAreaYear = 0.35;
+    constexpr float SoilCompetitionRadiusM = 2.5f;
+    constexpr double SoilCompetitionPressureScale = 3.0;
+    constexpr float SunOcclusionQueryPaddingM = 12.0f;
+    constexpr double ExternalLimbShadeTransmission = 0.35;
 
     // Genetics.
     constexpr double GenomeMutationStdDev = 0.08;
