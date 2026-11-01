@@ -45,7 +45,7 @@ The panels show population, lineage and energy plots, the selected tree's statis
 ./build/TreeSim --headless 200
 ```
 
-Simulates 200 years with no window and prints the elapsed time at the end. A summary line is printed once per simulated year in both modes (`EnableSimulationProfiling` in `simulation_constants.hpp` turns it off). It reports this year's rainfall, selfed seeds, the share of water demand met (`avgWaterSupply`), deaths by cause (broken trunks, uprooting, background mortality) and the number of storms, leaf counts, the share of intercepted light caught by leaves (`avgLeafShare`), the light-weighted width-to-thickness ratio of shoots (`avgFlatness`), fruiting tips, and limbs shed. The line ends with the diversity figures: surviving lineages, effective lineages (the inverse Simpson index), and the spread of each tracked trait as standard deviation over mean.
+Simulates 200 years with no window and prints the elapsed time at the end. Add `--output <dir>` to record the run (see below), and `--help` lists every option. A summary line is printed once per simulated year in both modes (`EnableSimulationProfiling` in `simulation_constants.hpp` turns it off). It reports this year's rainfall, selfed seeds, the share of water demand met (`avgWaterSupply`), deaths by cause (broken trunks, uprooting, background mortality) and the number of storms, leaf counts, the share of intercepted light caught by leaves (`avgLeafShare`), the light-weighted width-to-thickness ratio of shoots (`avgFlatness`), fruiting tips, and limbs shed. The line ends with the diversity figures: surviving lineages, effective lineages (the inverse Simpson index), and the spread of each tracked trait as standard deviation over mean.
 
 ### Tests
 
@@ -81,6 +81,67 @@ Things to know:
 - `World::Simulate` and the count, snapshot and soil getters are collective: every rank must call them in the same order, and the getters return the whole world on rank 0 only.
 - Windowed mode under `mpirun` (rank 0 owns the window) compiles but has only been exercised headless.
 
+## Recording runs and rendering them afterwards
+
+`--output <dir>` writes a run directory as the simulation goes, in windowed or headless mode:
+
+| File | Contents |
+|---|---|
+| `run.txt` | Seed, rank count, intervals and start time |
+| `metrics.csv` | One row per `--metrics-every` years (default 1): population, seeds waiting, limbs, mean and maximum height, mean energy, growth and reproduction, lineages, effective lineages and the spread of every trait |
+| `frames/frame_NNNNNN.bin` | One frame per `--frame-every` years (default 1; 0 writes metrics only): every limb of every tree, per-tree figures and the soil grid. The final state is always kept |
+
+```
+./build/TreeSim --headless 200 --seed 7 --output runs/seed7 --frame-every 2
+```
+
+A frame of a mature forest is a few megabytes, so set `--frame-every` to suit the run's length. Metrics are flushed row by row, so a job killed at its time limit still leaves usable data up to that point.
+
+There are three ways to look at a recorded run:
+
+- **Replay in the viewer**: `./build/TreeSim --replay runs/seed7 --replay-fps 8` plays the frames with the usual camera and colour modes, and holds the last frame until the window is closed. Replayed trees carry only the figures the frame stores, so some fields in the selected-tree panel read zero.
+- **Render without OpenGL**: `python tools/render_run.py runs/seed7` writes `render/metrics.png`, one PNG per frame (side and top views) and an MP4 (with ffmpeg) or GIF (without). Options include `--color default|lineage|strain|energy|age`, `--view side|top|both`, `--roots` to draw roots below ground, `--every N` to thin frames, and `--jobs N` to render in parallel. It needs numpy and matplotlib.
+- **Compare runs**: `python tools/compare_runs.py <sweep dir or run dirs>` overlays the metrics of several runs (mean, 10–90% band and every run) in `compare.png` and writes each run's final values to `summary.csv`.
+
+## Running on the cluster
+
+The `cluster/` scripts build a headless MPI binary and run it under Slurm, with results on BeeGFS under `/haydean/caleb/treesim` (`runs/`, `sweeps/` and `logs/`). `cluster/env.sh` holds the paths and can be overridden from the environment (`TREESIM_ROOT`, `TREESIM_BUILD`, `TREESIM_RESULTS`, `TREESIM_PYTHON`, `TREESIM_PARTITION`).
+
+Build once, from the repository root. The viewer is turned off (`-DTREESIM_BUILD_VIEWER=OFF`), so OpenGL and GLFW aren't needed, and GLM is downloaded if the system has none:
+
+```
+cluster/build.sh
+```
+
+`cluster/build.sh --node` builds on a compute node with `-march=native` instead. That build is faster, but it only runs on the compute nodes.
+
+Then run. Create the log directory first if it's missing; Slurm won't create it:
+
+```
+mkdir -p /haydean/caleb/treesim/logs
+sbatch cluster/run.sbatch
+YEARS=500 SEED=7 NAME=tall FRAME_EVERY=5 sbatch -N 2 -n 24 cluster/run.sbatch
+```
+
+Each run writes to `runs/<NAME>_<jobid>`. When it finishes it queues `cluster/render.sbatch`, which renders that run on one 12-core node; set `RENDER=0` to skip this or `RENDER_ARGS` to pass options. To render a run again in another colouring:
+
+```
+RUN_DIR=/haydean/caleb/treesim/runs/tall_1600 RENDER_ARGS="--color lineage --roots" sbatch cluster/render.sbatch
+```
+
+For an ensemble over seeds, submit a job array. Each task is a 4-rank run with seed `SEED_BASE + task id`, written to `sweeps/<NAME>_<array job id>/seed_<n>`, with a frame every 10 years by default:
+
+```
+YEARS=300 NAME=baseline sbatch --array=0-15 cluster/sweep.sbatch
+/haydean/caleb/venv/bin/python tools/compare_runs.py /haydean/caleb/treesim/sweeps/baseline_1700
+```
+
+Notes for this cluster:
+
+- The login node (Xeon E5620) is older than the compute nodes (Xeon E-2176G), and the system Open MPI crashes there with an illegal instruction. Build on the login node, but run MPI binaries only through `sbatch` or `srun`.
+- Nodes report about 1 MB of memory to Slurm, so the scripts don't request memory; adding `--mem` will keep jobs from scheduling.
+- Strips are equal in width, so ranks beyond about 24 on the default 20 m plot add exchange cost faster than they save work. Sweeps over many seeds use the cluster better than one very wide run.
+
 ## How the simulation works
 
 **Limbs and energy.** A tree is a shoot and a root, each a tree of limbs. A limb is an elliptic cylinder with its own length, width and thickness, so it can be a round stick, a thick trunk or a thin flat blade. A limb catches light in proportion to the shadow it casts toward the sun, which for a blade facing the sun is its whole face. Light-catching tissue respires 10% of what it would fix in full sun, wood costs energy to build and to maintain, reserves decay, and transporting nutrients costs more the longer the path. A tree whose energy drops below zero dies and its biomass returns to the soil as detritus.
@@ -113,6 +174,9 @@ Most tunable numbers live in `include/simulation/simulation_constants.hpp`; the 
 |---|---|
 | `include/simulation`, `src/simulation` | Simulation core: world, organisms, limbs, physics, quadtree, MPI wrapper |
 | `src/renderer` | OpenGL renderer, camera, ImGui panels, shaders |
-| `src/main.cpp` | Entry point and render-frame assembly |
+| `src/main.cpp` | Entry point, options, recording schedule and replay |
+| `include/simulation/recording.hpp`, `src/simulation/recording.cpp` | Frame capture and the run-directory format |
+| `tools/` | Offline rendering and run comparison (Python) |
+| `cluster/` | Cluster build script and Slurm jobs |
 | `tests/simulation_tests.cpp` | Simulation tests |
 | `external/glad` | OpenGL loader |

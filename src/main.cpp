@@ -2,8 +2,14 @@
 #include <cmath>
 #include <algorithm>
 #include <cstddef>
+#include <cstdio>
+#include <cstring>
+#include <ctime>
+#include <exception>
+#include <filesystem>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <random>
 #include <string>
 #include <thread>
@@ -11,189 +17,332 @@
 #include <vector>
 
 #include "simulation/distributed.hpp"
+#include "simulation/recording.hpp"
 #include "simulation/simulation_constants.hpp"
-#include "simulation/physics.hpp"
 #include "simulation/world.hpp"
+#ifdef TREESIM_WITH_VIEWER
 #include "renderer/renderer.hpp"
+#endif
 
 namespace
 {
-RenderFrame BuildRenderFrame(World& world, std::size_t& limbCount)
+struct Options
+{
+    // Simulated years for a run without a window; 0 opens the viewer.
+    float headlessYears = 0.0f;
+    unsigned int seed = std::random_device{}();
+    // Run directory for metrics and frames; empty records nothing.
+    std::string output;
+    float metricsEveryYears = 1.0f;
+    // 0 records metrics only.
+    float frameEveryYears = 1.0f;
+    // Run directory to play back in the viewer instead of simulating.
+    std::string replay;
+    float replayFps = 4.0f;
+};
+
+void PrintUsage()
+{
+    std::printf(
+        "Usage: TreeSim [options]\n"
+        "  --headless <years>       simulate without a window for this many years\n"
+        "  --seed <n>               make the run repeatable (per rank count)\n"
+        "  --output <dir>           write metrics.csv and frames to this run directory\n"
+        "  --metrics-every <years>  metrics interval (default 1)\n"
+        "  --frame-every <years>    frame interval; 0 writes metrics only (default 1)\n"
+        "  --replay <dir>           play a recorded run in the viewer\n"
+        "  --replay-fps <n>         frames per second during replay (default 4)\n");
+}
+
+Options ParseOptions(int argc, char** argv)
+{
+    Options options;
+    for (int i = 1; i < argc; ++i)
+    {
+        const std::string flag = argv[i];
+        if (flag == "--help" || flag == "-h")
+        {
+            if (Distributed::IsRoot())
+                PrintUsage();
+            Distributed::Finalize();
+            std::exit(0);
+        }
+        if (i + 1 >= argc)
+            continue;
+        const char* value = argv[i + 1];
+        if (flag == "--headless")
+            options.headlessYears = std::stof(value);
+        else if (flag == "--seed")
+            options.seed = static_cast<unsigned int>(std::stoul(value));
+        else if (flag == "--output")
+            options.output = value;
+        else if (flag == "--metrics-every")
+            options.metricsEveryYears = std::stof(value);
+        else if (flag == "--frame-every")
+            options.frameEveryYears = std::stof(value);
+        else if (flag == "--replay")
+            options.replay = value;
+        else if (flag == "--replay-fps")
+            options.replayFps = std::stof(value);
+        else
+            continue;
+        ++i;
+    }
+    return options;
+}
+
+// Decides when a recording interval has come due. Every rank runs the same
+// schedule on the same clock, so collective captures stay in step.
+class Schedule
+{
+public:
+    explicit Schedule(float intervalYears) : interval(intervalYears) {}
+
+    bool Due(float timeYears)
+    {
+        // Half a step of slack absorbs float drift in the accumulated clock.
+        if (interval <= 0.0f || timeYears + 0.5f * SimulationConstants::DefaultTimeStepYears < next)
+            return false;
+        next += interval;
+        return true;
+    }
+
+private:
+    float interval;
+    float next = 0.0f;
+};
+
+std::string Timestamp()
+{
+    const std::time_t now = std::time(nullptr);
+    char text[32];
+    std::strftime(text, sizeof(text), "%Y-%m-%dT%H:%M:%S", std::localtime(&now));
+    return text;
+}
+
+#ifdef TREESIM_WITH_VIEWER
+RenderFrame ToRenderFrame(Recording::Frame recorded)
 {
     RenderFrame frame;
-    const std::vector<Organism::RenderSnapshot> snapshots = world.GetRenderSnapshots();
-    limbCount = 0;
-    double totalEnergy = 0.0;
-    double totalHeight = 0.0;
-    double totalGrowth = 0.0;
-    double totalReproduction = 0.0;
-
-    frame.plants.reserve(snapshots.size());
-    for (const Organism::RenderSnapshot& snapshot : snapshots)
+    frame.plants.reserve(recorded.plants.size());
+    for (Recording::Plant& source : recorded.plants)
     {
         RenderFrame::Plant plant;
-        plant.id = snapshot.id;
-        plant.lineage = snapshot.lineage;
-        plant.energy = snapshot.energy;
-        plant.stats = snapshot.stats;
-        plant.bounds = snapshot.bounds;
-        plant.limbs.reserve(snapshot.limbs.size());
+        plant.id = source.id;
+        plant.lineage = source.lineage;
+        plant.energy = source.energy;
+        plant.stats = source.stats;
+        plant.bounds = source.bounds;
+        plant.limbs.reserve(source.limbs.size());
+        for (const Recording::Limb& limb : source.limbs)
+            plant.limbs.push_back({limb.root, limb.length, limb.width, limb.thickness, limb.orientation, limb.strain});
 
-        for (const Limb::LimbData& data : snapshot.limbs)
-        {
-            const float strain = static_cast<float>(std::clamp(
-                Physics::BendingUtilization(data.carriedTorque, data.orientation, data.width, data.thickness, snapshot.stats.effectiveBendingStrength),
-                0.0,
-                1.0));
-            plant.limbs.push_back({data.root, data.length, data.width, data.thickness, data.orientation, strain});
-        }
-
-        limbCount += plant.limbs.size();
-        frame.plants.push_back(std::move(plant));
-        totalEnergy += snapshot.energy;
-        totalHeight += snapshot.stats.maxHeight;
-        totalGrowth += snapshot.stats.shootGrowthLength + snapshot.stats.rootGrowthLength;
-        totalReproduction += snapshot.stats.reproductionPressure;
         frame.metrics.growthVsReproduction.push_back({
-            static_cast<float>(snapshot.stats.shootGrowthLength + snapshot.stats.rootGrowthLength),
-            static_cast<float>(snapshot.stats.reproductionPressure)
+            source.stats.shootGrowthLength + source.stats.rootGrowthLength,
+            static_cast<float>(source.stats.reproductionPressure)
         });
-        frame.metrics.energyVsHeight.push_back({
-            static_cast<float>(snapshot.energy),
-            snapshot.stats.maxHeight
-        });
+        frame.metrics.energyVsHeight.push_back({static_cast<float>(source.energy), source.stats.maxHeight});
+        frame.plants.push_back(std::move(plant));
     }
 
-    // The world only stores soil cells that differ from their resting capacity,
-    // so start from the capacity map and overlay the stored cells.
-    const float cellSize = SimulationConstants::SoilCellSizeM;
-    const int minCellX = static_cast<int>(std::floor(SimulationConstants::SimulationMinX / cellSize));
-    const int maxCellX = static_cast<int>(std::floor(SimulationConstants::SimulationMaxX / cellSize));
-    const int minCellZ = static_cast<int>(std::floor(SimulationConstants::SimulationMinZ / cellSize));
-    const int maxCellZ = static_cast<int>(std::floor(SimulationConstants::SimulationMaxZ / cellSize));
-    const int cellsPerRow = maxCellZ - minCellZ + 1;
-    for (int cellX = minCellX; cellX <= maxCellX; ++cellX)
-    {
-        for (int cellZ = minCellZ; cellZ <= maxCellZ; ++cellZ)
-        {
-            const glm::vec3 center((static_cast<float>(cellX) + 0.5f) * cellSize, 0.0f, (static_cast<float>(cellZ) + 0.5f) * cellSize);
-            frame.soilCells.push_back({cellX, cellZ, static_cast<float>(World::SoilCapacityAt(center)), 0.0f});
-        }
-    }
+    for (const Recording::SoilCell& cell : recorded.soilCells)
+        frame.soilCells.push_back({cell.cellX, cell.cellZ, cell.resource, cell.detritusKg});
 
-    for (const World::SoilSample& sample : world.GetSoilSamples())
-    {
-        if (sample.cellX < minCellX || sample.cellX > maxCellX || sample.cellZ < minCellZ || sample.cellZ > maxCellZ)
-            continue;
-
-        frame.soilCells[static_cast<std::size_t>((sample.cellX - minCellX) * cellsPerRow + (sample.cellZ - minCellZ))] = {
-            sample.cellX,
-            sample.cellZ,
-            static_cast<float>(std::clamp(sample.resource, 0.0, 1.0)),
-            static_cast<float>(std::max(0.0, sample.detritusKg))
-        };
-    }
-
-    const double plantCount = std::max<std::size_t>(1, snapshots.size());
-    frame.metrics.timeYears = world.GetTimeYears();
-    frame.metrics.population = static_cast<float>(world.GetOrganismCount());
-    frame.metrics.propagules = static_cast<float>(world.GetPropaguleCount());
-    frame.metrics.avgEnergy = static_cast<float>(totalEnergy / plantCount);
-    frame.metrics.avgHeight = static_cast<float>(totalHeight / plantCount);
-    frame.metrics.avgGrowth = static_cast<float>(totalGrowth / plantCount);
-    frame.metrics.avgReproduction = static_cast<float>(totalReproduction / plantCount);
-    const World::DiversitySummary diversity = World::SummarizeDiversity(world.GetTraitSamples());
-    frame.metrics.lineages = static_cast<float>(diversity.lineages);
-    frame.metrics.effectiveLineages = static_cast<float>(diversity.effectiveLineages);
-    for (std::size_t trait = 0; trait < Organism::TraitCount; ++trait)
-    {
-        frame.metrics.traitVariation[trait] = diversity.mean[trait] == 0.0
-            ? 0.0f
-            : static_cast<float>(diversity.deviation[trait] / std::abs(diversity.mean[trait]));
-    }
-    frame.neuralSamples = world.GetNeuralNetworkSamples(4);
+    const Recording::Metrics& metrics = recorded.metrics;
+    frame.metrics.timeYears = metrics.timeYears;
+    frame.metrics.population = metrics.population;
+    frame.metrics.propagules = metrics.propagules;
+    frame.metrics.avgEnergy = metrics.avgEnergy;
+    frame.metrics.avgHeight = metrics.avgHeight;
+    frame.metrics.avgGrowth = metrics.avgGrowth;
+    frame.metrics.avgReproduction = metrics.avgReproduction;
+    frame.metrics.lineages = metrics.lineages;
+    frame.metrics.effectiveLineages = metrics.effectiveLineages;
+    frame.metrics.traitVariation = metrics.traitVariation;
     return frame;
 }
+
+int Replay(const Options& options)
+{
+    const std::vector<std::filesystem::path> frames = Recording::ListFrames(options.replay);
+    if (frames.empty())
+    {
+        std::fprintf(stderr, "No frames in %s/frames\n", options.replay.c_str());
+        return 1;
+    }
+    std::printf("Replaying %zu frames from %s\n", frames.size(), options.replay.c_str());
+
+    RenderPipeline renderPipeline;
+    const auto framePeriod = std::chrono::duration<double>(1.0 / std::max(0.1f, options.replayFps));
+    for (const std::filesystem::path& path : frames)
+    {
+        if (!renderPipeline.IsRunning())
+            break;
+        const auto start = std::chrono::steady_clock::now();
+        renderPipeline.SubmitFrame(ToRenderFrame(Recording::ReadFrame(path)));
+        std::this_thread::sleep_until(start + framePeriod);
+    }
+    // Hold the last frame until the window is closed.
+    while (renderPipeline.IsRunning())
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    return 0;
+}
+#endif
 }
 
 int main(int argc, char** argv)
 {
     Distributed::Init(argc, argv);
     const bool isRoot = Distributed::IsRoot();
+    const Options options = ParseOptions(argc, argv);
+    const bool headless = options.headlessYears > 0.0f;
 
-    // "--headless <years>" runs without a window, e.g. on a cluster.
-    // "--seed <n>" makes a run repeatable.
-    float headlessYears = 0.0f;
-    unsigned int seed = std::random_device{}();
-    for (int i = 1; i + 1 < argc; ++i)
+    if (!options.replay.empty())
     {
-        if (std::string(argv[i]) == "--headless")
-            headlessYears = std::stof(argv[i + 1]);
-        if (std::string(argv[i]) == "--seed")
-            seed = static_cast<unsigned int>(std::stoul(argv[i + 1]));
+#ifdef TREESIM_WITH_VIEWER
+        const int status = isRoot ? Replay(options) : 0;
+#else
+        if (isRoot)
+            std::fprintf(stderr, "This build has no viewer; render the run with tools/render_run.py instead.\n");
+        const int status = 1;
+#endif
+        Distributed::Finalize();
+        return status;
     }
-    const bool headless = headlessYears > 0.0f;
-    std::mt19937 gen(seed);
 
+#ifndef TREESIM_WITH_VIEWER
+    if (!headless)
+    {
+        if (isRoot)
+            std::fprintf(stderr, "This build has no viewer; pass --headless <years>.\n");
+        Distributed::Finalize();
+        return 1;
+    }
+#endif
+
+    std::mt19937 gen(options.seed);
     std::uniform_real_distribution<float> spreadX(SimulationConstants::SimulationMinX, SimulationConstants::SimulationMaxX);
     std::uniform_real_distribution<float> spreadZ(SimulationConstants::SimulationMinZ, SimulationConstants::SimulationMaxZ);
 
+#ifdef TREESIM_WITH_VIEWER
     // Only the root rank owns a window; the others just simulate their strip.
     std::unique_ptr<RenderPipeline> renderPipeline;
     if (isRoot && !headless)
         renderPipeline = std::make_unique<RenderPipeline>();
-    World world(seed);
+#endif
+
+    std::unique_ptr<Recording::Writer> writer;
+    if (isRoot && !options.output.empty())
+    {
+        try
+        {
+            writer = std::make_unique<Recording::Writer>(options.output, std::vector<std::pair<std::string, std::string>>{
+                {"seed", std::to_string(options.seed)},
+                {"ranks", std::to_string(Distributed::RankCount())},
+                {"years", std::to_string(options.headlessYears)},
+                {"metrics_every", std::to_string(options.metricsEveryYears)},
+                {"frame_every", std::to_string(options.frameEveryYears)},
+                {"founders", std::to_string(SimulationConstants::InitialFounderCount)},
+                {"started", Timestamp()},
+            });
+            std::printf("Recording to %s\n", options.output.c_str());
+        }
+        catch (const std::exception& error)
+        {
+            std::fprintf(stderr, "%s\n", error.what());
+        }
+    }
+    // Every rank must agree on whether to capture, since capturing is collective.
+    const bool recording = Distributed::BroadcastFromRoot(writer != nullptr);
+    if (isRoot && !options.output.empty() && !recording)
+        std::fprintf(stderr, "Continuing without recording.\n");
+
+    World world(options.seed);
 
     // The root places the starting trees; the world hands each to the rank owning its position.
     for(int i = 0; isRoot && i<SimulationConstants::InitialFounderCount; i++){
         world.MakeOrganism({spreadX(gen),0,spreadZ(gen)}, glm::identity<glm::quat>());
     }
 
-    std::size_t limbCount = 0;
-    if (!headless)
-    {
-        RenderFrame frame = BuildRenderFrame(world, limbCount);
-        if (renderPipeline)
-        {
-            renderPipeline->SubmitFrame(std::move(frame));
-            printf("Initial trees: %zu limbs: %zu \n", world.GetOrganismCount(), limbCount);
-        }
-    }
-
+    Schedule metricsSchedule(recording ? options.metricsEveryYears : 0.0f);
+    Schedule frameSchedule(recording ? options.frameEveryYears : 0.0f);
     const double startSeconds = Distributed::WallTimeSeconds();
+    float lastCaptureYears = -1.0f;
+    std::size_t prevLimbCount = 0;
+
+    // Captures this step if the viewer or the recorder wants it. Collective.
+    const auto captureStep = [&](bool forceFrame)
+    {
+        const float now = world.GetTimeYears();
+        const bool writeFrame = frameSchedule.Due(now) || (forceFrame && recording && options.frameEveryYears > 0.0f && lastCaptureYears != now);
+        const bool writeMetrics = metricsSchedule.Due(now) || writeFrame;
+        if (!writeFrame && !writeMetrics && headless)
+            return;
+
+        Recording::Frame frame = Recording::Capture(world);
+        if (writeFrame)
+            lastCaptureYears = now;
+        if (writer)
+        {
+            if (writeMetrics)
+                writer->WriteMetrics(frame.metrics, Distributed::WallTimeSeconds() - startSeconds);
+            if (writeFrame)
+                writer->WriteFrame(frame);
+        }
+
+#ifdef TREESIM_WITH_VIEWER
+        if (headless)
+            return;
+        // Collective, so every rank asks even though only the root draws.
+        std::vector<Organism::NeuralNetworkSample> neuralSamples = world.GetNeuralNetworkSamples(4);
+        if (!renderPipeline)
+            return;
+        const std::size_t limbCount = static_cast<std::size_t>(frame.metrics.limbs);
+        if (limbCount != prevLimbCount)
+        {
+            std::printf("Limbs: %zu \n", limbCount);
+            prevLimbCount = limbCount;
+        }
+        RenderFrame renderFrame = ToRenderFrame(std::move(frame));
+        renderFrame.neuralSamples = std::move(neuralSamples);
+        renderPipeline->SubmitFrame(std::move(renderFrame));
+#else
+        (void)prevLimbCount;
+#endif
+    };
+
+    // Before the first step, founders are still waiting to reach their ranks.
+    if (!headless)
+        captureStep(false);
     while (true){
+#ifdef TREESIM_WITH_VIEWER
         const bool keepRunning = headless
-            ? world.GetTimeYears() < headlessYears
+            ? world.GetTimeYears() < options.headlessYears
             : (renderPipeline && renderPipeline->IsRunning());
+#else
+        const bool keepRunning = world.GetTimeYears() < options.headlessYears;
+#endif
         if (!Distributed::BroadcastFromRoot(keepRunning))
             break;
 
         world.Simulate(SimulationConstants::DefaultTimeStepYears);
-        if (headless)
-            continue;
-
-        RenderFrame frame = BuildRenderFrame(world, limbCount);
-        if (!renderPipeline)
-            continue;
-
-        renderPipeline->SubmitFrame(std::move(frame));
-
-        static std::size_t prevLimbCnt = limbCount;
-        if(prevLimbCnt != limbCount){
-            printf("Limbs: %zu \n", limbCount);
-            prevLimbCnt = limbCount;
-        }
-
-        // std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        captureStep(false);
     }
+    // Always keep the final state of a recorded run.
+    if (headless)
+        captureStep(true);
 
     if (headless)
     {
         const std::size_t trees = world.GetOrganismCount();
         if (isRoot)
             printf("Simulated %.1f years on %d rank(s) in %.1f s, %zu trees\n", world.GetTimeYears(), Distributed::RankCount(), Distributed::WallTimeSeconds() - startSeconds, trees);
+        if (writer)
+            printf("Wrote %zu frames to %s\n", writer->FrameCount(), options.output.c_str());
     }
 
+#ifdef TREESIM_WITH_VIEWER
     renderPipeline.reset();
+#endif
     Distributed::Finalize();
 }
