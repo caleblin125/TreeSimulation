@@ -21,6 +21,17 @@ if (NOT glm_FOUND)
     FetchContent_MakeAvailable(glm)
 endif()
 
+# JSON parameter files (header-only).
+find_package(nlohmann_json 3.11 CONFIG QUIET)
+if (NOT nlohmann_json_FOUND)
+    FetchContent_Declare(
+        nlohmann_json
+        URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    )
+    FetchContent_MakeAvailable(nlohmann_json)
+endif()
+
 add_library(TreeSimCore
     src/simulation/world.cpp
     src/simulation/organism.cpp
@@ -30,11 +41,12 @@ add_library(TreeSimCore
     src/simulation/physics.cpp
     src/simulation/distributed.cpp
     src/simulation/recording.cpp
+    src/simulation/parameters.cpp
 )
 target_include_directories(TreeSimCore PUBLIC
     include
 )
-target_link_libraries(TreeSimCore PUBLIC glm::glm)
+target_link_libraries(TreeSimCore PUBLIC glm::glm PRIVATE nlohmann_json::nlohmann_json)
 
 option(TREESIM_USE_MPI "Split the world across MPI ranks when launched under mpirun" OFF)
 if (TREESIM_USE_MPI)

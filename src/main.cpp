@@ -7,6 +7,7 @@
 #include <ctime>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -39,17 +40,26 @@ struct Options
     // Run directory to play back in the viewer instead of simulating.
     std::string replay;
     float replayFps = 4.0f;
+    // Stop a headless run early after this many wall-clock seconds; 0 means no limit.
+    double wallLimitSeconds = 0.0;
+    // JSON file overriding simulation parameters; empty keeps the defaults.
+    std::string params;
+    // Write the effective parameters here and exit.
+    std::string writeParams;
 };
 
 void PrintUsage()
 {
     std::printf(
         "Usage: TreeSim [options]\n"
+        "  --params <file.json>     override simulation parameters (see params/default.json)\n"
+        "  --write-params <file>    write every parameter, after --params, and exit\n"
         "  --headless <years>       simulate without a window for this many years\n"
         "  --seed <n>               make the run repeatable (per rank count)\n"
         "  --output <dir>           write metrics.csv and frames to this run directory\n"
         "  --metrics-every <years>  metrics interval (default 1)\n"
         "  --frame-every <years>    frame interval; 0 writes metrics only (default 1)\n"
+        "  --wall-limit <seconds>   end a headless run cleanly after this much wall time\n"
         "  --replay <dir>           play a recorded run in the viewer\n"
         "  --replay-fps <n>         frames per second during replay (default 4)\n");
 }
@@ -84,6 +94,12 @@ Options ParseOptions(int argc, char** argv)
             options.replay = value;
         else if (flag == "--replay-fps")
             options.replayFps = std::stof(value);
+        else if (flag == "--wall-limit")
+            options.wallLimitSeconds = std::stod(value);
+        else if (flag == "--params")
+            options.params = value;
+        else if (flag == "--write-params")
+            options.writeParams = value;
         else
             continue;
         ++i;
@@ -197,6 +213,34 @@ int main(int argc, char** argv)
     const Options options = ParseOptions(argc, argv);
     const bool headless = options.headlessYears > 0.0f;
 
+    // Every rank reads the file itself; they all see the same one, so they
+    // load the same values or all fail alike.
+    if (!options.params.empty())
+    {
+        try
+        {
+            SimulationConstants::LoadParameters(options.params);
+        }
+        catch (const std::exception& error)
+        {
+            if (isRoot)
+                std::fprintf(stderr, "%s\n", error.what());
+            Distributed::Finalize();
+            return 1;
+        }
+    }
+    if (!options.writeParams.empty())
+    {
+        if (isRoot)
+        {
+            std::ofstream file(options.writeParams);
+            SimulationConstants::WriteParameters(file);
+            std::printf("Wrote parameters to %s\n", options.writeParams.c_str());
+        }
+        Distributed::Finalize();
+        return 0;
+    }
+
     if (!options.replay.empty())
     {
 #ifdef TREESIM_WITH_VIEWER
@@ -238,13 +282,22 @@ int main(int argc, char** argv)
         {
             writer = std::make_unique<Recording::Writer>(options.output, std::vector<std::pair<std::string, std::string>>{
                 {"seed", std::to_string(options.seed)},
+                {"params", options.params.empty() ? "(defaults)" : options.params},
                 {"ranks", std::to_string(Distributed::RankCount())},
                 {"years", std::to_string(options.headlessYears)},
                 {"metrics_every", std::to_string(options.metricsEveryYears)},
                 {"frame_every", std::to_string(options.frameEveryYears)},
                 {"founders", std::to_string(SimulationConstants::InitialFounderCount)},
+                {"wall_limit", std::to_string(options.wallLimitSeconds)},
+                {"plot_min_x", std::to_string(SimulationConstants::SimulationMinX)},
+                {"plot_max_x", std::to_string(SimulationConstants::SimulationMaxX)},
+                {"plot_min_z", std::to_string(SimulationConstants::SimulationMinZ)},
+                {"plot_max_z", std::to_string(SimulationConstants::SimulationMaxZ)},
                 {"started", Timestamp()},
             });
+            // The values actually used, so the run can be repeated with --params.
+            std::ofstream paramsFile(std::filesystem::path(options.output) / "params.json");
+            SimulationConstants::WriteParameters(paramsFile);
             std::printf("Recording to %s\n", options.output.c_str());
         }
         catch (const std::exception& error)
@@ -314,13 +367,18 @@ int main(int argc, char** argv)
     // Before the first step, founders are still waiting to reach their ranks.
     if (!headless)
         captureStep(false);
+    // Only the root's answer counts; it is broadcast with keepRunning below.
+    const auto wallLimitReached = [&]
+    {
+        return options.wallLimitSeconds > 0.0 && Distributed::WallTimeSeconds() - startSeconds >= options.wallLimitSeconds;
+    };
     while (true){
 #ifdef TREESIM_WITH_VIEWER
         const bool keepRunning = headless
-            ? world.GetTimeYears() < options.headlessYears
+            ? world.GetTimeYears() < options.headlessYears && !wallLimitReached()
             : (renderPipeline && renderPipeline->IsRunning());
 #else
-        const bool keepRunning = world.GetTimeYears() < options.headlessYears;
+        const bool keepRunning = world.GetTimeYears() < options.headlessYears && !wallLimitReached();
 #endif
         if (!Distributed::BroadcastFromRoot(keepRunning))
             break;

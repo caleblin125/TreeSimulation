@@ -8,6 +8,12 @@
 #include <cmath>
 #include <algorithm>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <stdexcept>
+
+#include <unistd.h>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -1290,6 +1296,53 @@ void TestHiddenLayerAndBranchClasses()
 }
 }
 
+void TestParameterFiles()
+{
+    const std::filesystem::path directory = std::filesystem::temp_directory_path() / ("treesim_params_test_" + std::to_string(::getpid()));
+    std::filesystem::create_directories(directory);
+    const auto writeFile = [&](const std::string& name, const std::string& text)
+    {
+        std::ofstream(directory / name) << text;
+        return (directory / name).string();
+    };
+    const auto loadFails = [](const std::string& path)
+    {
+        try
+        {
+            SimulationConstants::LoadParameters(path);
+        }
+        catch (const std::runtime_error&)
+        {
+            return true;
+        }
+        return false;
+    };
+
+    std::ostringstream defaults;
+    SimulationConstants::WriteParameters(defaults);
+    const std::string defaultsPath = writeFile("defaults.json", defaults.str());
+
+    const double storms = SimulationConstants::StormsPerYear;
+    SimulationConstants::LoadParameters(writeFile("partial.json", "// a comment\n{ \"plot\": { \"PlotSizeM\": 40, \"InitialFounderCount\": 240 } }"));
+    ExpectNear(SimulationConstants::PlotSizeM, 40.0, 1.0e-9, "parameter file sets the plot size");
+    ExpectNear(SimulationConstants::SimulationMaxX, 20.0, 1.0e-9, "plot bounds follow the plot size");
+    Expect(SimulationConstants::InitialFounderCount == 240, "parameter file sets the founder count");
+    ExpectNear(SimulationConstants::StormsPerYear, storms, 0.0, "parameters a file leaves out keep their value");
+
+    Expect(loadFails(writeFile("unknown.json", "{ \"wind\": { \"StormsPerYer\": 2 } }")), "an unknown parameter is rejected");
+    Expect(loadFails(writeFile("type.json", "{ \"plot\": { \"InitialFounderCount\": 2.5 } }")), "a fraction is rejected for a whole-number parameter");
+    Expect(loadFails(writeFile("negative.json", "{ \"plot\": { \"PlotSizeM\": -5 } }")), "a negative plot size is rejected");
+
+    // Loading the written defaults restores every value exactly.
+    SimulationConstants::LoadParameters(defaultsPath);
+    std::ostringstream restored;
+    SimulationConstants::WriteParameters(restored);
+    Expect(restored.str() == defaults.str(), "written parameters read back unchanged");
+    ExpectNear(SimulationConstants::SimulationMaxX, 10.0, 1.0e-9, "plot bounds restored with the defaults");
+
+    std::filesystem::remove_all(directory);
+}
+
 int main()
 {
     TestGeometry();
@@ -1338,6 +1391,8 @@ int main()
     TestBarkStopsPhotosynthesis();
     TestShadeCompoundsWithLayers();
     TestHiddenLayerAndBranchClasses();
+
+    TestParameterFiles();
 
     if (failures > 0)
     {

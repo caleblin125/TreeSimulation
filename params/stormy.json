@@ -1,0 +1,12 @@
+// An example experiment: twice as many storms, gusting harder, and drier
+// years. Compare against a default run with tools/compare_runs.py.
+{
+  "wind": {
+    "StormsPerYear": 2.0,
+    "StormMeanGustMps": 16.0,
+    "DesignWindSpeedMps": 16.0
+  },
+  "water": {
+    "RainfallYearSpread": 0.45
+  }
+}

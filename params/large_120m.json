@@ -1,0 +1,9 @@
+// A 120 m x 120 m forest, 36 times the default area, for multi-node runs.
+// Founders keep the default density of 60 per 400 m2. Everything not listed
+// here keeps its default; see default.json for every parameter.
+{
+  "plot": {
+    "PlotSizeM": 120,
+    "InitialFounderCount": 2160
+  }
+}

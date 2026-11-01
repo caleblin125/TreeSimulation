@@ -6,6 +6,9 @@
 #
 # Settings (environment): YEARS (200), SEED (job id), NAME (run),
 # METRICS_EVERY (1 year), FRAME_EVERY (1 year; 0 = metrics only),
+# PARAMS (JSON parameter file, e.g. params/large_120m.json; relative paths are
+# from the repository), WALL_LIMIT (seconds; stop cleanly after this long,
+# keeping the final frame; set it a few minutes under --time),
 # RENDER (1: queue tools/render_run.py once the run finishes),
 # RENDER_ARGS (extra arguments for render_run.py).
 #
@@ -30,11 +33,19 @@ mkdir -p "$RUN_DIR"
 echo "TreeSim: $YEARS years, seed $SEED, $SLURM_NTASKS ranks on $SLURM_JOB_NODELIST -> $RUN_DIR"
 git -C "$TREESIM_ROOT" rev-parse HEAD > "$RUN_DIR/commit.txt" 2>/dev/null || true
 
+params_args=()
+if [[ -n "${PARAMS:-}" ]]; then
+    [[ "$PARAMS" = /* ]] || PARAMS="$TREESIM_ROOT/$PARAMS"
+    params_args=(--params "$PARAMS")
+fi
+
 srun --mpi=pmix "$TREESIM_BUILD/TreeSim" \
+    "${params_args[@]}" \
     --headless "$YEARS" \
     --seed "$SEED" \
     --output "$RUN_DIR" \
     --metrics-every "${METRICS_EVERY:-1}" \
+    --wall-limit "${WALL_LIMIT:-0}" \
     --frame-every "${FRAME_EVERY:-1}" \
     > "$RUN_DIR/stdout.txt"
 tail -n 2 "$RUN_DIR/stdout.txt"

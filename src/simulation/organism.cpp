@@ -881,8 +881,8 @@ std::vector<Organism::LimbLight> Organism::CalculateSunlight(const std::vector<s
     // side, so a limb catches its share of it in proportion to its surface,
     // which is four times the average shadow a body casts.
     const auto track = SunTrack(environment.yearFraction);
-    constexpr double direct = 1.0 - SimulationConstants::DiffuseLightFraction;
-    constexpr double diffuse = SimulationConstants::DiffuseLightFraction;
+    const double direct = 1.0 - SimulationConstants::DiffuseLightFraction;
+    const double diffuse = SimulationConstants::DiffuseLightFraction;
 
     std::vector<LimbLight> ret;
     ret.reserve(limbs.size());

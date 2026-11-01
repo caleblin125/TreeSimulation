@@ -45,7 +45,7 @@ The panels show population, lineage and energy plots, the selected tree's statis
 ./build/TreeSim --headless 200
 ```
 
-Simulates 200 years with no window and prints the elapsed time at the end. Add `--output <dir>` to record the run (see below), and `--help` lists every option. A summary line is printed once per simulated year in both modes (`EnableSimulationProfiling` in `simulation_constants.hpp` turns it off). It reports this year's rainfall, selfed seeds, the share of water demand met (`avgWaterSupply`), deaths by cause (broken trunks, uprooting, background mortality) and the number of storms, leaf counts, the share of intercepted light caught by leaves (`avgLeafShare`), the light-weighted width-to-thickness ratio of shoots (`avgFlatness`), fruiting tips, and limbs shed. The line ends with the diversity figures: surviving lineages, effective lineages (the inverse Simpson index), and the spread of each tracked trait as standard deviation over mean.
+Simulates 200 years with no window and prints the elapsed time at the end. Add `--output <dir>` to record the run (see below), and `--help` lists every option. A summary line is printed once per simulated year in both modes (`output.EnableSimulationProfiling` in a parameter file turns it off). It reports this year's rainfall, selfed seeds, the share of water demand met (`avgWaterSupply`), deaths by cause (broken trunks, uprooting, background mortality) and the number of storms, leaf counts, the share of intercepted light caught by leaves (`avgLeafShare`), the light-weighted width-to-thickness ratio of shoots (`avgFlatness`), fruiting tips, and limbs shed. The line ends with the diversity figures: surviving lineages, effective lineages (the inverse Simpson index), and the spread of each tracked trait as standard deviation over mean.
 
 ### Tests
 
@@ -81,13 +81,40 @@ Things to know:
 - `World::Simulate` and the count, snapshot and soil getters are collective: every rank must call them in the same order, and the getters return the whole world on rank 0 only.
 - Windowed mode under `mpirun` (rank 0 owns the window) compiles but has only been exercised headless.
 
+## Parameters
+
+Almost every number the simulation uses can be changed at run time with a JSON file, so you don't need to rebuild:
+
+```
+./build/TreeSim --headless 200 --params params/stormy.json
+```
+
+[params/default.json](params/default.json) lists every parameter with its default, grouped into sections (plot, wind, energy, growth, reproduction, soil, light, water, genetics and so on). Each section's `_notes` explain what its parameters do. Parameter names match the variables in `include/simulation/simulation_constants.hpp`.
+
+To make your own file, list only what you change. Everything else keeps its default:
+
+```json
+// Comments are allowed.
+{
+  "plot": { "PlotSizeM": 40, "InitialFounderCount": 240 },
+  "mortality": { "BackgroundMortalityPerYear": 0.02 }
+}
+```
+
+An unknown name, a wrong type or bad JSON stops the run with a message, so a typo can't silently do nothing. A recorded run saves the values it used as `params.json` in its run directory, and passing that file back with `--params` repeats the run. `--write-params <file>` writes every parameter after applying `--params` and exits; regenerate `params/default.json` with it when you add a parameter.
+
+Examples in `params/`: `large_120m.json` (a 120 m plot with 36 times the trees) and `stormy.json` (more and stronger storms, more variable rainfall).
+
+To add a parameter, declare it `inline` in `simulation_constants.hpp` and add a line for it to the table in `src/simulation/parameters.cpp`. Values marked `constexpr` there are fixed physics or structure and can't be overridden. Parameters are read once at startup and must not change while a world exists.
+
 ## Recording runs and rendering them afterwards
 
 `--output <dir>` writes a run directory as the simulation goes, in windowed or headless mode:
 
 | File | Contents |
 |---|---|
-| `run.txt` | Seed, rank count, intervals and start time |
+| `run.txt` | Seed, rank count, intervals, plot extent and start time |
+| `params.json` | Every parameter value the run used |
 | `metrics.csv` | One row per `--metrics-every` years (default 1): population, seeds waiting, limbs, mean and maximum height, mean energy, growth and reproduction, lineages, effective lineages and the spread of every trait |
 | `frames/frame_NNNNNN.bin` | One frame per `--frame-every` years (default 1; 0 writes metrics only): every limb of every tree, per-tree figures and the soil grid. The final state is always kept |
 
@@ -100,7 +127,7 @@ A frame of a mature forest is a few megabytes, so set `--frame-every` to suit th
 There are three ways to look at a recorded run:
 
 - **Replay in the viewer**: `./build/TreeSim --replay runs/seed7 --replay-fps 8` plays the frames with the usual camera and colour modes, and holds the last frame until the window is closed. Replayed trees carry only the figures the frame stores, so some fields in the selected-tree panel read zero.
-- **Render without OpenGL**: `python tools/render_run.py runs/seed7` writes `render/metrics.png`, one PNG per frame (side and top views) and an MP4 (with ffmpeg) or GIF (without). Options include `--color default|lineage|strain|energy|age`, `--view side|top|both`, `--roots` to draw roots below ground, `--every N` to thin frames, and `--jobs N` to render in parallel. It needs numpy and matplotlib.
+- **Render without OpenGL**: `python tools/render_run.py runs/seed7` writes `render/metrics.png`, one PNG per frame (side and top views) and an MP4 (with ffmpeg, or `pip install imageio-ffmpeg` where there is none, as on the cluster) or GIF (without). Options include `--color default|lineage|strain|energy|age`, `--view side|top|both|corner` (`corner` is a 3D perspective from above one corner; `--elevation`, `--azimuth`, `--fov` and `--orbit <degrees>` place and turn the camera), `--roots` to draw roots below ground, `--every N` to thin frames, and `--jobs N` to render in parallel. It needs numpy and matplotlib.
 - **Compare runs**: `python tools/compare_runs.py <sweep dir or run dirs>` overlays the metrics of several runs (mean, 10–90% band and every run) in `compare.png` and writes each run's final values to `summary.csv`.
 
 ## Running on the cluster
@@ -136,9 +163,26 @@ YEARS=300 NAME=baseline sbatch --array=0-15 cluster/sweep.sbatch
 /haydean/caleb/venv/bin/python tools/compare_runs.py /haydean/caleb/treesim/sweeps/baseline_1700
 ```
 
+`PARAMS` passes a parameter file (see [Parameters](#parameters)), which is how to run a bigger forest. `WALL_LIMIT` ends a run cleanly, keeping its final frame, before Slurm's time limit would kill it:
+
+```
+PARAMS=params/large_120m.json YEARS=100000 WALL_LIMIT=13800 NAME=forest120m FRAME_EVERY=2 \
+    RENDER_ARGS="--slab 20" sbatch -N 4 -n 48 --time=04:00:00 cluster/run.sbatch
+```
+
+For a parameter study, run a sweep per parameter file and compare the sweeps:
+
+```
+NAME=baseline sbatch --array=0-15 cluster/sweep.sbatch
+PARAMS=params/stormy.json NAME=stormy sbatch --array=0-15 cluster/sweep.sbatch
+```
+
+On the 120 m plot, 48 ranks run about 2 s per simulated year while the forest is young, and about 14 s per year at 15,000 trees and 100,000 limbs. `run.txt` records the plot's extent, and the render tools read it. `--slab 20` limits the side view to a 20 m deep slice, so a large plot doesn't become a wall of trunks.
+
 Notes for this cluster:
 
 - The login node (Xeon E5620) is older than the compute nodes (Xeon E-2176G), and the system Open MPI crashes there with an illegal instruction. Build on the login node, but run MPI binaries only through `sbatch` or `srun`.
+- Matplotlib rereads font files for every label, which on BeeGFS made each frame take seconds, so `render_run.py` copies its fonts to local `/tmp` first. There is no system ffmpeg, so `imageio-ffmpeg` is installed in `/haydean/caleb/venv` for MP4 output.
 - Nodes report about 1 MB of memory to Slurm, so the scripts don't request memory; adding `--mem` will keep jobs from scheduling.
 - Strips are equal in width, so ranks beyond about 24 on the default 20 m plot add exchange cost faster than they save work. Sweeps over many seeds use the cluster better than one very wide run.
 
@@ -166,7 +210,7 @@ Each step, every limb in the world is filed by where its shadow falls along each
 
 **Reproduction and evolution.** Juveniles put everything into growth. Once a tree is old and tall enough, it sets a share of its net income aside for seed, so a more productive tree raises a bigger crop. Seeds are borne at the tips of sunlit, unbranched shoots, at most six per tip per event, so a branched crown can carry far more seed than a single stem. One gene, seed size, sets the rest: a seed costs four times its energy reserve, larger seeds establish more often and make up for poor soil and shade, and lighter seeds travel farther. Seeds leave from the tip that bore them and travel in proportion to its height (20 m for the default size released at 5 m, between 0.5 and 40 m overall), so height pays off in reach. A seed's establishment odds fall with the shade of the canopy above it, which favours big seeds under a closed canopy and small, far-flying ones in the gaps storms open. The seedling starts life with the reserve its parent packed. Seeds have two parents. Each seed's pollen comes from a flowering neighbour within 6 m, chosen in proportion to its flowering tips and closeness, so more tips also means more pollen. The seed takes each gene from either parent at random, and each brain output's weights whole from one of them, so good traits from different trees can meet in one seedling. A tree with no flowering neighbour in reach selfs, and selfed seed establishes half as often. The seed is then mutated; genes include growth rates, cross-section growth rates and starting size, wood density and strength, xylem geometry, branch angles, seed size and the brain weights. Most steps are small, but 2% of genes take a step eight times larger, which lets a lineage jump to a different design. Each seed also carries its mother's founding-ancestor id unchanged, which is what the lineage counts and the lineage colouring are built on.
 
-Most tunable numbers live in `include/simulation/simulation_constants.hpp`; the default genome is in `include/simulation/organism.hpp`. `SIMULATION_SOURCES.txt` records where the physical constants come from.
+Most tunable numbers live in `include/simulation/simulation_constants.hpp` and can be overridden from a JSON file (see [Parameters](#parameters)); the default genome is in `include/simulation/organism.hpp`. `SIMULATION_SOURCES.txt` records where the physical constants come from.
 
 ## Layout
 
@@ -176,6 +220,7 @@ Most tunable numbers live in `include/simulation/simulation_constants.hpp`; the 
 | `src/renderer` | OpenGL renderer, camera, ImGui panels, shaders |
 | `src/main.cpp` | Entry point, options, recording schedule and replay |
 | `include/simulation/recording.hpp`, `src/simulation/recording.cpp` | Frame capture and the run-directory format |
+| `src/simulation/parameters.cpp`, `params/` | JSON parameter loading, and parameter files |
 | `tools/` | Offline rendering and run comparison (Python) |
 | `cluster/` | Cluster build script and Slurm jobs |
 | `tests/simulation_tests.cpp` | Simulation tests |

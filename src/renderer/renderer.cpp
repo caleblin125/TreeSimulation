@@ -534,7 +534,7 @@ void Renderer::DrawSoilNutrition()
     shader.SetMat4("uModel", glm::value_ptr(glm::mat4(1.0f)));
     glBindVertexArray(soilVAO);
 
-    constexpr float cellSize = static_cast<float>(SimulationConstants::SoilCellSizeM);
+    const float cellSize = static_cast<float>(SimulationConstants::SoilCellSizeM);
     constexpr float y = 0.015f;
     for (const RenderFrame::SoilCell& cell : soilCells)
     {
