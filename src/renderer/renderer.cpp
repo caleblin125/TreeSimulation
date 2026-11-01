@@ -7,6 +7,7 @@
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
+#include <implot.h>
 #include <chrono>
 #include <algorithm>
 #include <cfloat>
@@ -122,6 +123,7 @@ Renderer::Renderer()
     glViewport(0, 0, 800, 600);
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
+    ImPlot::CreateContext();
     ImGui::StyleColorsDark();
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 330");
@@ -152,14 +154,13 @@ Renderer::Renderer()
     glEnableVertexAttribArray(0);
     glBindVertexArray(0);
 
-    float planeSide = 100.0f;
     float floorVertices[]={
-        planeSide, 0.0f, planeSide,
-        -planeSide, 0.0f, planeSide,
-        -planeSide, 0.0f, -planeSide,
-        -planeSide, 0.0f, -planeSide,
-        planeSide, 0.0f, planeSide,
-        planeSide, 0.0f, -planeSide,
+        SimulationConstants::SimulationMaxX, 0.0f, SimulationConstants::SimulationMaxZ,
+        SimulationConstants::SimulationMinX, 0.0f, SimulationConstants::SimulationMaxZ,
+        SimulationConstants::SimulationMinX, 0.0f, SimulationConstants::SimulationMinZ,
+        SimulationConstants::SimulationMinX, 0.0f, SimulationConstants::SimulationMinZ,
+        SimulationConstants::SimulationMaxX, 0.0f, SimulationConstants::SimulationMaxZ,
+        SimulationConstants::SimulationMaxX, 0.0f, SimulationConstants::SimulationMinZ,
     };
 
     glGenVertexArrays(1, &floorVAO);
@@ -275,6 +276,7 @@ Renderer::~Renderer()
     {
         ImGui_ImplOpenGL3_Shutdown();
         ImGui_ImplGlfw_Shutdown();
+        ImPlot::DestroyContext();
         ImGui::DestroyContext();
     }
 
@@ -310,7 +312,7 @@ void Renderer::DrawLimb(std::weak_ptr<Limb> limb)
         return;
 
     const Limb::LimbData data = limbPtr->GetData();
-    DrawLimb({data.root, data.length, data.radius, data.orientation});
+    DrawLimb({data.root, data.length, data.width, data.thickness, data.orientation});
 }
 
 void Renderer::DrawLimb(const RenderLimb& limb)
@@ -342,6 +344,8 @@ void Renderer::SetFrame(RenderFrame frame)
         avgEnergyHistory.push_back(latestMetrics.avgEnergy);
         avgGrowthHistory.push_back(latestMetrics.avgGrowth);
         avgReproductionHistory.push_back(latestMetrics.avgReproduction);
+        lineageHistory.push_back(latestMetrics.lineages);
+        effectiveLineageHistory.push_back(latestMetrics.effectiveLineages);
         constexpr std::size_t maxHistory = 600;
         auto trim = [&](std::vector<float>& values)
         {
@@ -352,6 +356,8 @@ void Renderer::SetFrame(RenderFrame frame)
         trim(avgEnergyHistory);
         trim(avgGrowthHistory);
         trim(avgReproductionHistory);
+        trim(lineageHistory);
+        trim(effectiveLineageHistory);
     }
     if (selectedPlantId && !FindSelectedPlant())
         selectedPlantId.reset();
@@ -470,7 +476,7 @@ bool Renderer::RayIntersectsLimb(const glm::vec3& origin, const glm::vec3& direc
 
     const glm::vec3 rayPoint = origin + direction * rayT;
     const glm::vec3 segmentPoint = segmentStart + segment * segmentT;
-    const float hitRadius = std::max(limb.radius, 0.05f);
+    const float hitRadius = std::max(0.5f * std::max(limb.width, limb.thickness), 0.05f);
     if (glm::length(rayPoint - segmentPoint) > hitRadius)
         return false;
 
@@ -495,7 +501,28 @@ glm::vec4 Renderer::LimbColor(const RenderFrame::Plant& plant, const RenderLimb&
         return glm::vec4(0.2f + 0.8f * t, 0.95f * (1.0f - t), 0.12f, 1.0f);
     }
 
+    if (renderMode == RenderMode::Lineage)
+    {
+        // Golden-ratio steps around the colour wheel keep neighbouring ids far apart.
+        const float hue = glm::fract(static_cast<float>(plant.lineage) * 0.61803398875f) * 6.0f;
+        const float value = 0.65f + 0.35f * glm::fract(static_cast<float>(plant.lineage) * 0.38196601125f);
+        const auto channel = [&](float offset)
+        {
+            const float k = glm::mod(offset + hue, 6.0f);
+            return value * (1.0f - 0.8f * std::clamp(std::min(k, 4.0f - k), 0.0f, 1.0f));
+        };
+        return glm::vec4(channel(5.0f), channel(3.0f), channel(1.0f), 1.0f);
+    }
+
+    if (IsLeaf(limb))
+        return glm::vec4(0.25f, 0.72f, 0.22f, 1.0f);
     return glm::vec4(1.0f);
+}
+
+bool Renderer::IsLeaf(const RenderLimb& limb)
+{
+    const float narrow = std::max(1.0e-6f, std::min(limb.width, limb.thickness));
+    return std::max(limb.width, limb.thickness) / narrow >= SimulationConstants::LeafAspectRatio;
 }
 
 void Renderer::DrawSoilNutrition()
@@ -611,7 +638,8 @@ bool Renderer::Update()
             const glm::vec4 color = selected
                 ? glm::vec4(0.25f, 1.0f, 0.35f, 1.0f)
                 : LimbColor(plant, limb, maxEnergy);
-            const bool useUniformColor = selected || renderMode == RenderMode::PlantEnergy || renderMode == RenderMode::PressureStrain;
+            // Default mode keeps the position colouring for wood and paints leaves green.
+            const bool useUniformColor = selected || renderMode != RenderMode::Default || IsLeaf(limb);
             shader.SetInt("uUseUniformColor", useUniformColor ? 1 : 0);
             if (useUniformColor)
                 shader.SetVec4("uColor", color.r, color.g, color.b, color.a);
@@ -619,7 +647,7 @@ bool Renderer::Update()
             model = glm::mat4(1.0f);
             model = glm::translate(model, limb.root);
             model *= glm::mat4_cast(limb.orientation);
-            model = glm::scale(model, {limb.radius, limb.length, limb.radius});
+            model = glm::scale(model, {0.5f * limb.width, limb.length, 0.5f * limb.thickness});
 
             shader.SetMat4("uModel", glm::value_ptr(model));
             glDrawElements(GL_TRIANGLES, limbvert, GL_UNSIGNED_INT, nullptr);
@@ -744,6 +772,8 @@ void Renderer::DrawNeuralNetworkWindow()
     ImGui::RadioButton("Energy", &mode, static_cast<int>(RenderMode::PlantEnergy));
     ImGui::SameLine();
     ImGui::RadioButton("Strain", &mode, static_cast<int>(RenderMode::PressureStrain));
+    ImGui::SameLine();
+    ImGui::RadioButton("Lineage", &mode, static_cast<int>(RenderMode::Lineage));
     renderMode = static_cast<RenderMode>(mode);
     ImGui::Text("Samples: %zu", neuralSamples.size());
     if (selectedPlantId)
@@ -751,8 +781,9 @@ void Renderer::DrawNeuralNetworkWindow()
     else
         ImGui::TextUnformatted("Selected plant: none");
 
-    static const char* outputNames[] = {"elongate", "thicken", "root", "split", "branch n", "attach", "reproduce"};
-    static const char* inputNames[] = {"bias", "energy", "resource", "sun", "underground", "length", "torque", "age", "height"};
+    // Direct weights only; the hidden layer is not shown.
+    static const char* outputNames[] = {"elongate", "thicken", "root", "split", "branch n", "attach", "reproduce", "widen", "child class", "fine bud"};
+    static const char* inputNames[] = {"bias", "energy", "resource", "sun", "underground", "length", "torque", "age", "height", "depth", "tip height", "tip", "class"};
 
     for (std::size_t sampleIndex = 0; sampleIndex < neuralSamples.size(); ++sampleIndex)
     {
@@ -817,11 +848,20 @@ void Renderer::DrawSelectedPlantWindow()
 
     const Organism::Stats& stats = plant->stats;
     ImGui::Begin("Selected organism");
-    ImGui::Text("id %u   age %.2f years   limbs %u", plant->id, stats.ageYears, stats.limbCount);
+    ImGui::Text("id %u   lineage %u   age %.2f years   limbs %u", plant->id, plant->lineage, stats.ageYears, stats.limbCount);
     ImGui::Text("energy %.1f J   start %.1f J   alive %s", plant->energy, stats.energyStart, stats.alive ? "yes" : "no");
     ImGui::Separator();
     ImGui::Text("height %.2f m   leaf %.3f m2   root %.3f m2", stats.maxHeight, stats.leafArea, stats.rootSurfaceArea);
-    ImGui::Text("biomass %.3f kg", stats.biomassKg);
+    ImGui::Text("leaves %u (%.0f%% of light)   fruiting tips %u   shed %u",
+        stats.leafCount,
+        100.0 * stats.leafShare,
+        stats.fruitingSites,
+        stats.limbsShed);
+    ImGui::Text("biomass %.3f kg   root %.3f kg in %u limbs   anchorage margin %.2f",
+        stats.biomassKg,
+        stats.rootBiomassKg,
+        stats.rootLimbCount,
+        stats.anchorageMargin);
     ImGui::Text("resource %.2f   soil %.2f   root %.2f   hydraulic %.2f",
         stats.resourceFactor,
         stats.soilResourceFactor,
@@ -858,15 +898,49 @@ void Renderer::DrawMetricsWindow()
         latestMetrics.propagules);
     ImGui::Text("avg energy %.1f J   avg height %.2f m", latestMetrics.avgEnergy, latestMetrics.avgHeight);
     ImGui::Text("avg growth %.4f m/step   avg reproduce %.2f", latestMetrics.avgGrowth, latestMetrics.avgReproduction);
+    ImGui::Text("lineages %.0f   effective %.1f", latestMetrics.lineages, latestMetrics.effectiveLineages);
+    if (ImGui::TreeNode("trait variation (sd / mean)"))
+    {
+        for (std::size_t trait = 0; trait < Organism::TraitCount; ++trait)
+            ImGui::Text("%-12s %.3f", Organism::TraitNames[trait], latestMetrics.traitVariation[trait]);
+        ImGui::TreePop();
+    }
 
-    if (!populationHistory.empty())
-        ImGui::PlotLines("population", populationHistory.data(), static_cast<int>(populationHistory.size()), 0, nullptr, 0.0f, FLT_MAX, ImVec2(0.0f, 80.0f));
-    if (!avgEnergyHistory.empty())
-        ImGui::PlotLines("avg energy", avgEnergyHistory.data(), static_cast<int>(avgEnergyHistory.size()), 0, nullptr, FLT_MAX, FLT_MAX, ImVec2(0.0f, 80.0f));
-    if (!avgGrowthHistory.empty())
-        ImGui::PlotLines("avg growth", avgGrowthHistory.data(), static_cast<int>(avgGrowthHistory.size()), 0, nullptr, 0.0f, FLT_MAX, ImVec2(0.0f, 80.0f));
-    if (!avgReproductionHistory.empty())
-        ImGui::PlotLines("avg reproduction", avgReproductionHistory.data(), static_cast<int>(avgReproductionHistory.size()), 0, nullptr, 0.0f, 1.0f, ImVec2(0.0f, 80.0f));
+    if (ImPlot::BeginPlot("population", ImVec2(-1.0f, 120.0f), ImPlotFlags_CanvasOnly))
+    {
+        ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_NoTickLabels, ImPlotAxisFlags_AutoFit);
+        if (!populationHistory.empty())
+            ImPlot::PlotLine("trees", populationHistory.data(), static_cast<int>(populationHistory.size()));
+        ImPlot::EndPlot();
+    }
+
+    if (ImPlot::BeginPlot("lineages", ImVec2(-1.0f, 120.0f)))
+    {
+        ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_NoTickLabels, ImPlotAxisFlags_AutoFit);
+        if (!lineageHistory.empty())
+            ImPlot::PlotLine("surviving", lineageHistory.data(), static_cast<int>(lineageHistory.size()));
+        if (!effectiveLineageHistory.empty())
+            ImPlot::PlotLine("effective", effectiveLineageHistory.data(), static_cast<int>(effectiveLineageHistory.size()));
+        ImPlot::EndPlot();
+    }
+
+    if (ImPlot::BeginPlot("average energy", ImVec2(-1.0f, 120.0f), ImPlotFlags_CanvasOnly))
+    {
+        ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_NoTickLabels, ImPlotAxisFlags_AutoFit);
+        if (!avgEnergyHistory.empty())
+            ImPlot::PlotLine("J", avgEnergyHistory.data(), static_cast<int>(avgEnergyHistory.size()));
+        ImPlot::EndPlot();
+    }
+
+    if (ImPlot::BeginPlot("growth and reproduction", ImVec2(-1.0f, 140.0f)))
+    {
+        ImPlot::SetupAxes("sample", "normalized", ImPlotAxisFlags_NoTickLabels, ImPlotAxisFlags_AutoFit);
+        if (!avgGrowthHistory.empty())
+            ImPlot::PlotLine("growth", avgGrowthHistory.data(), static_cast<int>(avgGrowthHistory.size()));
+        if (!avgReproductionHistory.empty())
+            ImPlot::PlotLine("reproduction", avgReproductionHistory.data(), static_cast<int>(avgReproductionHistory.size()));
+        ImPlot::EndPlot();
+    }
 
     DrawScatterPlot("growth vs reproduction", latestMetrics.growthVsReproduction, "growth", "reproduce");
     DrawScatterPlot("energy vs height", latestMetrics.energyVsHeight, "energy", "height");
@@ -875,40 +949,22 @@ void Renderer::DrawMetricsWindow()
 
 void Renderer::DrawScatterPlot(const char* label, const std::vector<RenderFrame::ScatterPoint>& points, const char* xLabel, const char* yLabel)
 {
-    ImGui::TextUnformatted(label);
-    const ImVec2 size(ImGui::GetContentRegionAvail().x, 140.0f);
-    const ImVec2 origin = ImGui::GetCursorScreenPos();
-    ImGui::InvisibleButton(label, size);
-    ImDrawList* drawList = ImGui::GetWindowDrawList();
-    drawList->AddRect(origin, ImVec2(origin.x + size.x, origin.y + size.y), IM_COL32(110, 110, 110, 255));
-
-    if (points.empty())
+    if (points.empty() || !ImPlot::BeginPlot(label, ImVec2(-1.0f, 160.0f)))
         return;
 
-    float minX = points.front().x;
-    float maxX = points.front().x;
-    float minY = points.front().y;
-    float maxY = points.front().y;
+    std::vector<float> xValues;
+    std::vector<float> yValues;
+    xValues.reserve(points.size());
+    yValues.reserve(points.size());
     for (const RenderFrame::ScatterPoint& point : points)
     {
-        minX = std::min(minX, point.x);
-        maxX = std::max(maxX, point.x);
-        minY = std::min(minY, point.y);
-        maxY = std::max(maxY, point.y);
+        xValues.push_back(point.x);
+        yValues.push_back(point.y);
     }
-    if (std::abs(maxX - minX) < 1.0e-6f)
-        maxX = minX + 1.0f;
-    if (std::abs(maxY - minY) < 1.0e-6f)
-        maxY = minY + 1.0f;
 
-    for (const RenderFrame::ScatterPoint& point : points)
-    {
-        const float x = (point.x - minX) / (maxX - minX);
-        const float y = (point.y - minY) / (maxY - minY);
-        const ImVec2 p(origin.x + 6.0f + x * (size.x - 12.0f), origin.y + size.y - 6.0f - y * (size.y - 12.0f));
-        drawList->AddCircleFilled(p, 2.5f, IM_COL32(90, 220, 120, 220));
-    }
-    ImGui::Text("%s %.3g..%.3g   %s %.3g..%.3g", xLabel, minX, maxX, yLabel, minY, maxY);
+    ImPlot::SetupAxes(xLabel, yLabel, ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+    ImPlot::PlotScatter(label, xValues.data(), yValues.data(), static_cast<int>(points.size()));
+    ImPlot::EndPlot();
 }
 
 void Renderer::DrawDebugBoundingBoxes()

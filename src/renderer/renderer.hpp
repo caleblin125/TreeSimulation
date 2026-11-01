@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
@@ -21,7 +22,8 @@ struct RenderLimb
 {
     glm::vec3 root;
     float length = 0.0f;
-    float radius = 0.0f;
+    float width = 0.0f;
+    float thickness = 0.0f;
     glm::quat orientation;
     float strain = 0.0f;
 };
@@ -31,6 +33,7 @@ struct RenderFrame
     struct Plant
     {
         unsigned int id = 0;
+        unsigned int lineage = 0;
         double energy = 0.0;
         Organism::Stats stats;
         Organism::BoundingBox bounds{};
@@ -60,6 +63,10 @@ struct RenderFrame
         float avgHeight = 0.0f;
         float avgGrowth = 0.0f;
         float avgReproduction = 0.0f;
+        float lineages = 0.0f;
+        float effectiveLineages = 0.0f;
+        // Standard deviation over mean, per Organism::Trait.
+        std::array<float, Organism::TraitCount> traitVariation{};
         std::vector<ScatterPoint> growthVsReproduction;
         std::vector<ScatterPoint> energyVsHeight;
     };
@@ -96,6 +103,7 @@ private:
     void DrawScatterPlot(const char* label, const std::vector<RenderFrame::ScatterPoint>& points, const char* xLabel, const char* yLabel);
     glm::vec4 PlantColor(const RenderFrame::Plant& plant, double maxEnergy) const;
     glm::vec4 LimbColor(const RenderFrame::Plant& plant, const RenderLimb& limb, double maxEnergy) const;
+    static bool IsLeaf(const RenderLimb& limb);
     const RenderFrame::Plant* FindSelectedPlant() const;
 
     bool alive = false;
@@ -121,6 +129,8 @@ private:
     std::vector<float> avgEnergyHistory;
     std::vector<float> avgGrowthHistory;
     std::vector<float> avgReproductionHistory;
+    std::vector<float> lineageHistory;
+    std::vector<float> effectiveLineageHistory;
     float lastMetricTime = -1.0f;
 
     enum class RenderMode
@@ -128,7 +138,8 @@ private:
         Default,
         SoilNutrition,
         PlantEnergy,
-        PressureStrain
+        PressureStrain,
+        Lineage
     };
 
     Shader shader;

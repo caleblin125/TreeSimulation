@@ -31,6 +31,13 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(imgui)
 
+FetchContent_Declare(
+    implot
+    URL https://github.com/epezent/implot/archive/refs/tags/v0.16.zip
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+FetchContent_MakeAvailable(implot)
+
 add_library(imgui STATIC
     ${imgui_SOURCE_DIR}/imgui.cpp
     ${imgui_SOURCE_DIR}/imgui_draw.cpp
@@ -52,16 +59,34 @@ else()
 endif()
 target_link_libraries(imgui PUBLIC glad OpenGL::GL)
 
+add_library(implot STATIC
+    ${implot_SOURCE_DIR}/implot.cpp
+    ${implot_SOURCE_DIR}/implot_items.cpp
+)
+target_include_directories(implot PUBLIC
+    ${implot_SOURCE_DIR}
+)
+target_link_libraries(implot PUBLIC imgui)
+
 add_library(TreeSimCore
     src/simulation/world.cpp
     src/simulation/organism.cpp
     src/simulation/limb.cpp
     src/simulation/geometry.cpp
+    src/simulation/light.cpp
     src/simulation/physics.cpp
+    src/simulation/distributed.cpp
 )
 target_include_directories(TreeSimCore PUBLIC
     include
 )
+
+option(TREESIM_USE_MPI "Split the world across MPI ranks when launched under mpirun" OFF)
+if (TREESIM_USE_MPI)
+    find_package(MPI REQUIRED COMPONENTS CXX)
+    target_compile_definitions(TreeSimCore PRIVATE TREESIM_USE_MPI)
+    target_link_libraries(TreeSimCore PUBLIC MPI::MPI_CXX)
+endif()
 
 add_library(TreeSimRenderer
     src/renderer/renderer.cpp
@@ -80,6 +105,7 @@ endif()
 target_link_libraries(TreeSimRenderer PUBLIC
     glad
     imgui
+    implot
     OpenGL::GL
     Threads::Threads
     TreeSimCore
