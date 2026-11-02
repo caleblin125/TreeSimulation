@@ -1,4 +1,5 @@
 #include "simulation/recording.hpp"
+#include "simulation/terrain.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -191,6 +192,21 @@ Writer::Writer(const std::filesystem::path& directory, const std::vector<std::pa
     std::ofstream runFile(directory / "run.txt");
     for (const auto& [key, value] : settings)
         runFile << key << '=' << value << '\n';
+
+    // The ground's heightfield, for renderers: "TSTERR01", nodes along x and
+    // z (i32), the first node's x and z and the spacing (f32), then heights
+    // (f32) row by row along x.
+    if (Terrain::Enabled())
+    {
+        const Terrain::Grid& grid = Terrain::GetGrid();
+        std::ofstream terrainFile(directory / "terrain.bin", std::ios::binary);
+        const std::int32_t nodes[2] = {grid.nodesX, grid.nodesZ};
+        const float placement[3] = {grid.minX, grid.minZ, grid.cell};
+        terrainFile.write("TSTERR01", 8);
+        terrainFile.write(reinterpret_cast<const char*>(nodes), sizeof(nodes));
+        terrainFile.write(reinterpret_cast<const char*>(placement), sizeof(placement));
+        terrainFile.write(reinterpret_cast<const char*>(grid.heights.data()), static_cast<std::streamsize>(grid.heights.size() * sizeof(float)));
+    }
 
     metricsFile.open(directory / "metrics.csv");
     if (!metricsFile)

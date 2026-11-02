@@ -1,0 +1,16 @@
+// The 120 m forest on rolling hills: 25 m of relief in hills about 80 m
+// across. Trees in the hollows get the water that runs off the slopes,
+// ridge-top trees take the strongest wind, and steep sunward slopes are
+// thin-soiled and dry. Everything not listed keeps its default.
+{
+  "plot": {
+    "PlotSizeM": 120,
+    "InitialFounderCount": 2160
+  },
+  "terrain": {
+    "TerrainEnabled": true,
+    "TerrainSeed": 7,
+    "TerrainReliefM": 25,
+    "TerrainFeatureSizeM": 80
+  }
+}

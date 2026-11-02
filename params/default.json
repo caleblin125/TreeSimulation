@@ -35,6 +35,24 @@
     "DesignWindSpeedMps": 12.0,
     "StormLocalGustSpread": 0.3
   },
+  "wood": {
+    "_notes": {
+      "EnableSecondaryGrowth": "Secondary growth. Every woody limb's cambium lays on wood as the tree above it grows, paid before the growth the brain asks for, as fast as the tree can afford. A limb must carry HuberValue m2 of sapwood per m2 of green area it supplies (pipe model; wood never shrinks, so old pipes stay on as heartwood), be at least as thick as anything it bears, and an upright stem must stand a safety factor below Greenhill's buckling height 0.79 (E / rho g)^(1/3) D^(2/3).",
+      "HuberValue": "Sapwood area per unit of green area. Real trees: 1e-4 to 1e-3.",
+      "OpenBucklingSafetyFactor": "Buckling safety factor of a tree in full sun. McMahon (1973): about 4 for open-grown trees.",
+      "ShadedBucklingSafetyFactor": "Buckling safety factor of a fully shaded tree, which puts height before girth. The factor runs between the two with the sun on the tree's green parts.",
+      "WoodElasticModulusPa": "Green wood at the reference density; scales with each genome's density.",
+      "GreenWoodMassPerDryMass": "Living wood holds about its dry weight in water.",
+      "SapwoodDepthM": "Only the outer sapwood is alive and respires; heartwood is dead. Real sapwood runs 1 to 10 cm deep."
+    },
+    "EnableSecondaryGrowth": true,
+    "HuberValue": 0.00025,
+    "OpenBucklingSafetyFactor": 4.0,
+    "ShadedBucklingSafetyFactor": 1.5,
+    "WoodElasticModulusPa": 9000000000.0,
+    "GreenWoodMassPerDryMass": 2.0,
+    "SapwoodDepthM": 0.04
+  },
   "mortality": {
     "_notes": {
       "BackgroundMortalityPerYear": "Disease, fire, grazing: every tree dies with this chance each year."
@@ -65,18 +83,18 @@
   },
   "growth": {
     "_notes": {
+      "UpkeepReserveYears": "Growth has no fixed rate: a tree spends what it can afford, split between its limbs' length, width and thickness by their growth signals. It always keeps this many years of its current upkeep in reserve, besides GrowthReserveFraction of a seed.",
       "BranchSpawnEnergyJ": "Bud break plus the first few centimeters of shoot: roughly the construction cost of a seedling-sized twig, not of a mature branch. Bud overhead on top of the wood in the new shoot.",
       "BudLengthM": "New branches start as buds this long and grow from there.",
       "MaxBudThinning": "A fully \"fine\" side bud starts this share thinner than the genome's starting thickness.",
       "MinSplitGrowthM": "A limb may branch once it is this long, and again each time it has grown this much further.",
       "MaxSegmentLengthM": "No single limb grows longer than this. A segment that reaches it stops lengthening and opens a leader bud at its tip, so height and reach come from chains of segments and their side branches.",
-      "DefaultCrossSectionGrowthMPerYear": "Cross-section growth rate at full brain signal, for width and thickness alike.",
       "LeafAspectRatio": "Limbs at least this many times wider than thick count as leaves in the stats.",
       "MinSheddingAgeYears": "Unbranched shoots older than this are shed once their running energy balance turns negative."
     },
     "WoodConstructionEnergyJPerKg": 17000000.0,
     "GrowthReserveFraction": 0.35,
-    "MaxBranchElongationMetersPerYear": 0.6,
+    "UpkeepReserveYears": 0.5,
     "AverageTreeSeedDryMassKg": 0.000488,
     "SeedReserveEnergyDensityJPerKg": 24000000.0,
     "BranchSpawnEnergyJ": 1000.0,
@@ -85,12 +103,10 @@
     "MaxBranchesPerSplit": 6,
     "MinSplitGrowthM": 0.25,
     "MaxSegmentLengthM": 0.6,
-    "DefaultCrossSectionGrowthMPerYear": 0.02,
     "MinLimbDimensionM": 0.0002,
     "LeafAspectRatio": 4.0,
     "MinSheddingAgeYears": 1.0,
     "LimbBalanceTimeConstantYears": 0.5,
-    "BaselineRootGrowthFraction": 0.15,
     "BranchSplitSignalThreshold": 0.15,
     "ReproductionSignalThreshold": 0.65
   },
@@ -200,6 +216,34 @@
     },
     "PollenRangeM": 6.0,
     "SelfedEstablishmentFactor": 0.5
+  },
+  "terrain": {
+    "_notes": {
+      "TerrainEnabled": "Off: flat ground at height 0. On: a fractal heightfield, the same on every rank, raises and tilts the ground and trees grow upright from wherever they root. Water collects in hollows (topographic wetness index ln(a / tan slope)), steep slopes carry thinner soil, wind speeds up over crests and slackens in hollows, slopes facing the noon sun run drier and higher ground has a shorter growing season.",
+      "TerrainReliefM": "Height difference between the lowest and highest point.",
+      "TerrainFeatureSizeM": "Size of the largest hills and valleys.",
+      "TerrainGridCellM": "Grid spacing for the wetness and exposure maps.",
+      "TerrainWetnessEffect": "Water supply changes by this share per standard deviation of wetness index.",
+      "TerrainSlopeSoilLoss": "Soil capacity lost per unit of slope (rise over run).",
+      "TerrainWindSpeedup": "Wind speed changes by this share per standard deviation of how far a spot stands above its surroundings (Jackson & Hunt 1975: up to 1.6x on low hills), within the bounds below.",
+      "TerrainExposureRadiusM": "Radius of the surroundings a spot's height is compared against.",
+      "TerrainSunSlopeDryness": "Water demand rises by this share on a 45 degree slope facing the noon sun.",
+      "TerrainSeasonLossPer100M": "Share of the growing season lost per 100 m above the lowest point (about 4 days per 100 m in alpine larch)."
+    },
+    "TerrainEnabled": false,
+    "TerrainSeed": 1,
+    "TerrainReliefM": 15.0,
+    "TerrainFeatureSizeM": 60.0,
+    "TerrainOctaves": 4,
+    "TerrainGridCellM": 2.0,
+    "TerrainWetnessEffect": 0.25,
+    "TerrainSlopeSoilLoss": 0.6,
+    "TerrainWindSpeedup": 0.25,
+    "TerrainMinWindFactor": 0.6,
+    "TerrainMaxWindFactor": 1.6,
+    "TerrainExposureRadiusM": 20.0,
+    "TerrainSunSlopeDryness": 0.3,
+    "TerrainSeasonLossPer100M": 0.022
   },
   "genetics": {
     "_notes": {

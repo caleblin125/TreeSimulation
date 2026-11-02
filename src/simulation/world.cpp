@@ -2,6 +2,7 @@
 #include "simulation/distributed.hpp"
 #include "simulation/quadtree.hpp"
 #include "simulation/simulation_constants.hpp"
+#include "simulation/terrain.hpp"
 
 #include <iostream>
 #include <algorithm>
@@ -85,6 +86,9 @@ void World::MakeOrganism(glm::vec3 root, glm::quat orientation, Organism::Genome
         outboundOrganisms.push_back({root, orientation, initialEnergy, genome});
         return;
     }
+
+    // Trees grow upright from wherever they root.
+    root.y = Terrain::HeightAt(root.x, root.z);
 
     // Interleave ids across ranks so they stay unique world-wide.
     const unsigned int id = ids++ * static_cast<unsigned int>(rankCount) + static_cast<unsigned int>(rank);
@@ -332,7 +336,7 @@ void World::SimulateSubstep(
         localLimbs.reserve(limbSpatial.size());
         localRoots.reserve(organismSpatial.size());
         for (const LimbSpatial& local : limbSpatial)
-            localLimbs.push_back({local.limb->GetRoot(), local.limb->GetOrientation(), local.limb->GetLength(), local.limb->GetWidth(), local.limb->GetThickness()});
+            localLimbs.push_back({local.limb->GetRoot(), local.limb->GetOrientation(), local.limb->GetLength(), local.limb->GetWidth(), local.limb->GetThickness(), local.limb->GetGroundHeight()});
         for (const OrganismSpatial& local : organismSpatial)
             localRoots.push_back({local.root, local.rootArea});
 
@@ -363,6 +367,7 @@ void World::SimulateSubstep(
     for (const GhostLimb& ghost : ghostLimbs)
     {
         const auto limb = std::make_shared<Limb>(ghost.root, ghost.orientation, ghost.length, ghost.width, ghost.thickness);
+        limb->SetGroundHeight(ghost.groundHeight);
         const Spatial::Bounds2 bounds = LimbBounds2(limb);
         if (Spatial::Intersects(bounds, worldBounds))
             limbSpatial.push_back({limb, ghostOwner, bounds});
@@ -411,8 +416,14 @@ void World::SimulateSubstep(
         environment.rainfall = rainfall;
         environment.wind = wind;
         environment.lightField = &lightField;
+        const glm::vec3 base = o->GetRootPosition();
+        const Terrain::Site site = Terrain::SiteAt(base.x, base.z);
+        environment.waterSupply = site.water;
+        environment.waterDemand = site.dryness;
+        environment.windExposure = site.wind;
+        environment.growingSeason = site.season;
         if (wind.referenceSpeed > 0.0)
-            environment.wind.referenceSpeed *= std::exp(localGust(randomGenerator));
+            environment.wind.referenceSpeed *= std::exp(localGust(randomGenerator)) * site.wind;
         if (spatialIt != organismSpatial.end())
         {
             const std::size_t owner = static_cast<std::size_t>(std::distance(organismSpatial.begin(), spatialIt));
@@ -518,7 +529,7 @@ void World::SimulateSubstep(
     };
     const auto groundLight = [&](glm::vec3 position)
     {
-        position.y = 0.05f;
+        position.y = Terrain::HeightAt(position.x, position.z) + 0.05f;
         double light = SimulationConstants::DiffuseLightFraction *
             transmission(position, sunTrack.size(), SimulationConstants::DiffuseTransmissionPerLayer);
         for (std::size_t point = 0; point < sunTrack.size(); ++point)
@@ -734,7 +745,11 @@ World::DiversitySummary World::SummarizeDiversity(const std::vector<Organism::Tr
 
 double World::SoilCapacityAt(glm::vec3 position)
 {
-    return SoilCapacityOfCellZ(static_cast<std::int32_t>(std::floor(position.z / SimulationConstants::SoilCellSizeM)));
+    // Thin soil on steep ground, judged at the cell's centre.
+    const float cellX = (std::floor(position.x / SimulationConstants::SoilCellSizeM) + 0.5f) * SimulationConstants::SoilCellSizeM;
+    const float cellZ = (std::floor(position.z / SimulationConstants::SoilCellSizeM) + 0.5f) * SimulationConstants::SoilCellSizeM;
+    return SoilCapacityOfCellZ(static_cast<std::int32_t>(std::floor(position.z / SimulationConstants::SoilCellSizeM))) *
+        Terrain::SiteAt(cellX, cellZ).soil;
 }
 
 void World::SpawnPropagules(unsigned int count, Organism& parent, const std::vector<PollenDonor>& donors)
@@ -758,7 +773,7 @@ void World::SpawnPropagules(unsigned int count, Organism& parent, const std::vec
     for (unsigned int i = 0; i < count; ++i)
     {
         const glm::vec3& origin = sites[i % sites.size()];
-        const float reach = Organism::SeedDispersalRadius(seedEnergy, origin.y);
+        const float reach = Organism::SeedDispersalRadius(seedEnergy, origin.y - Terrain::HeightAt(origin.x, origin.z));
         const float angle = angleDistribution(randomGenerator);
         const float radius = SimulationConstants::SeedMinDispersalRadiusM + (reach - SimulationConstants::SeedMinDispersalRadiusM) * unitDistribution(randomGenerator);
         const glm::vec3 direction(std::cos(angle), 0.0f, std::sin(angle));

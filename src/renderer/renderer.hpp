@@ -117,6 +117,7 @@ private:
 
     unsigned int floorVAO = 0;
     unsigned int floorVBO = 0;
+    GLsizei floorVertexCount = 6;
     unsigned int soilVAO = 0;
     unsigned int soilVBO = 0;
 

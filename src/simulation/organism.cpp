@@ -64,6 +64,7 @@ bool Organism::Simulate(float dtYears, const Environment& environment)
 
     core->UpdatePose();
     rootSystem->UpdatePose();
+    const float ground = core->GetGroundHeight();
     std::vector<std::shared_ptr<Limb>> limbs = CollectLimbs();
     for (const auto& limb : limbs)
     {
@@ -78,7 +79,7 @@ bool Organism::Simulate(float dtYears, const Environment& environment)
     double designWindOverturning = 0.0;
     for (const glm::vec3& direction : {glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f)})
     {
-        core->UpdateLoads(genome.woodDensity, {direction, SimulationConstants::DesignWindSpeedMps});
+        core->UpdateLoads(genome.woodDensity, {direction, SimulationConstants::DesignWindSpeedMps * environment.windExposure});
         double overturning = 0.0;
         for (const auto& limb : limbs)
         {
@@ -122,7 +123,7 @@ bool Organism::Simulate(float dtYears, const Environment& environment)
         if (limb->CanPhotosynthesize())
             maxNutrientPathLength = std::max(maxNutrientPathLength, limb->NutrientPathLength());
 
-        lastStats.maxHeight = std::max(lastStats.maxHeight, limb->GetEnd().y);
+        lastStats.maxHeight = std::max(lastStats.maxHeight, limb->GetEnd().y - ground);
     }
 
     // Light is caught by whatever area a limb turns to the sun. Flat limbs are
@@ -137,7 +138,7 @@ bool Organism::Simulate(float dtYears, const Environment& environment)
         leafArea += lit.interceptArea;
         // Sunlit tissue transpires, and broad blades run hotter and lose more.
         const double heating = 1.0 + 0.5 * std::sqrt(2.0 * lit.limb->GetReach() / SimulationConstants::LeafCoolingWidthM);
-        waterDemand += lit.interceptArea * lit.exposure * heating;
+        waterDemand += lit.interceptArea * lit.exposure * heating * environment.waterDemand;
         weightedAspect += lit.interceptArea * lit.limb->GetAspectRatio();
         if (lit.limb->GetAspectRatio() >= SimulationConstants::LeafAspectRatio)
         {
@@ -163,7 +164,7 @@ bool Organism::Simulate(float dtYears, const Environment& environment)
     // Water: what roots and xylem deliver in this year's rain against what the
     // leaves transpire. Short of it, stomata close and photosynthesis falls.
     const double hydraulicLeafSupport = effectiveRootArea * genome.rootSupportedLeafArea * xylemConductance * (1.0 - embolismLoss) / hydraulicPathPenalty *
-        std::max(0.0, environment.rainfall);
+        std::max(0.0, environment.rainfall * environment.waterSupply);
     const double hydraulicResourceFactor = waterDemand <= 0.0
         ? 1.0
         : std::clamp(hydraulicLeafSupport / waterDemand, 0.0, 1.0);
@@ -180,11 +181,15 @@ bool Organism::Simulate(float dtYears, const Environment& environment)
     lastStats.xylemConductanceMultiplier = xylemConductance;
     lastStats.embolismLossFraction = embolismLoss;
     lastStats.effectiveBendingStrength = EffectiveBendingStrength();
+    double exposedArea = 0.0;
+    for (const LimbLight& lit : limbLight)
+        exposedArea += lit.interceptArea * lit.exposure;
+    const std::unordered_map<const Limb*, float> cambiumTargets = SecondaryGrowthTargets(limbs, leafArea <= 0.0 ? 1.0 : exposedArea / leafArea);
     std::vector<LimbDecision> limbDecisions = EvaluateGrowthBrains(limbs, limbLight);
 
     // Every shoot keeps a running account of what it earns against what it
     // costs; one that stays in the red is eventually shed.
-    const double activeSeconds = dtYears * SimulationConstants::SecondsPerYear * SimulationConstants::ActivePhotosynthesisFractionOfYear;
+    const double activeSeconds = dtYears * SimulationConstants::SecondsPerYear * SimulationConstants::ActivePhotosynthesisFractionOfYear * environment.growingSeason;
     const double maintenanceSeconds = dtYears * SimulationConstants::SecondsPerYear;
     const double woodRespirationJPerM3 = SimulationConstants::WoodyMaintenanceRespirationMolCo2PerM3Second * maintenanceSeconds * SimulationConstants::EnergyJPerMolCo2Fixed;
     const double balanceBlend = std::clamp(static_cast<double>(dtYears) / SimulationConstants::LimbBalanceTimeConstantYears, 0.0, 1.0);
@@ -204,13 +209,13 @@ bool Organism::Simulate(float dtYears, const Environment& environment)
         lastStats.nutrientTransportEnergy += transportEnergy;
         lastStats.respirationEnergy += tissueRespiration;
 
-        const double net = gainedEnergy - transportEnergy - tissueRespiration - lit.limb->Volume() * woodRespirationJPerM3;
+        const double net = gainedEnergy - transportEnergy - tissueRespiration - LivingWoodVolume(*lit.limb) * woodRespirationJPerM3;
         lit.limb->energyBalance += (net / std::max(1.0e-6, static_cast<double>(dtYears)) - lit.limb->energyBalance) * balanceBlend;
     }
 
     for (const auto& limb : limbs)
     {
-        const double respirationEnergy = limb->Volume() * woodRespirationJPerM3;
+        const double respirationEnergy = LivingWoodVolume(*limb) * woodRespirationJPerM3;
         energy -= respirationEnergy;
         lastStats.respirationEnergy += respirationEnergy;
     }
@@ -241,7 +246,12 @@ bool Organism::Simulate(float dtYears, const Environment& environment)
     {
         return a.brain.elongation > b.brain.elongation;
     });
-    const double growthReserveEnergy = genome.seedInitialEnergy * SimulationConstants::GrowthReserveFraction;
+    // Growth may spend anything beyond a reserve: part of the seed's
+    // provision, or enough to keep the tree's tissue alive for a while,
+    // whichever is more, so a tree does not build itself into starvation.
+    const double growthReserveEnergy = std::max(
+        genome.seedInitialEnergy * SimulationConstants::GrowthReserveFraction,
+        lastStats.respirationEnergy / std::max(1.0e-6, static_cast<double>(dtYears)) * SimulationConstants::UpkeepReserveYears);
     auto growthSpendLimit = [&]()
     {
         return std::max(0.0, energy - growthReserveEnergy - reproductiveEnergyBudget);
@@ -359,73 +369,123 @@ bool Organism::Simulate(float dtYears, const Environment& environment)
         lastStats.branchesSpawned++;
     }
 
-    // Length, width and thickness grow independently. Every limb asks for its
-    // growth first, and when the tree cannot pay for all of it every request is
-    // scaled back by the same share, so shoots cannot starve the roots. Volume is
-    // convex in that share, so the scaled cost never exceeds the same share of
-    // the full cost and the total stays within what the tree can spend.
-    struct GrowthRequest
+    // Growth has no fixed rate: it is limited only by what the tree can pay.
+    // The cambium is paid first. The rest of the step's spending goes to the
+    // brain's growth along each limb's three axes on their own signals: the
+    // tip lays down length over the cross-section, and new layers of width
+    // and thickness cover the faces across them. Every metre of signal buys
+    // the same growth everywhere, so a bud lengthens as fast as a long shoot,
+    // and that rate is whatever the tree's spending affords this step.
+    const auto grow = [&](Limb& limb, float length, float width, float thickness)
     {
-        std::shared_ptr<Limb> limb;
-        float addLength = 0.0f;
-        float addWidth = 0.0f;
-        float addThickness = 0.0f;
-        double fullCost = 0.0;
-        bool root = false;
+        const bool root = !limb.CanPhotosynthesize();
+        const double oldVolume = limb.Volume();
+        const float oldLength = limb.GetLength();
+        limb.SetDimensions(length, width, thickness);
+        const double cost = std::max(0.0, limb.Volume() - oldVolume) * constructionEnergyPerM3;
+        energy -= cost;
+        (root ? lastStats.rootGrowthCost : lastStats.shootGrowthCost) += cost;
+        (root ? lastStats.rootGrowthLength : lastStats.shootGrowthLength) += length - oldLength;
     };
-    std::vector<GrowthRequest> requests;
-    requests.reserve(limbDecisions.size());
-    double requestedEnergy = 0.0;
-    for (const LimbDecision& decision : limbDecisions)
+
+    // Cambium: widen and thicken in proportion, keeping the limb's shape, up
+    // to its target diameter. Cost is convex in the share of the way taken,
+    // so taking the affordable share of every target stays within budget.
+    double cambiumCost = 0.0;
+    for (const auto& [limb, target] : cambiumTargets)
     {
-        GrowthRequest request;
-        request.limb = decision.limb;
-        if (decision.limb->CanPhotosynthesize())
+        const double scale = static_cast<double>(target) / std::max(1.0e-9, static_cast<double>(limb->GetEquivalentDiameter()));
+        cambiumCost += limb->Volume() * (scale * scale - 1.0) * constructionEnergyPerM3;
+    }
+    if (cambiumCost > 0.0)
+    {
+        const double share = std::clamp(growthSpendLimit() / cambiumCost, 0.0, 1.0);
+        for (const LimbDecision& decision : limbDecisions)
         {
-            request.addLength = static_cast<float>(genome.shootGrowthRate * decision.brain.elongation * dtYears);
-            request.addWidth = static_cast<float>(genome.widthGrowthRate * decision.brain.widening * dtYears);
-            request.addThickness = static_cast<float>(genome.thicknessGrowthRate * decision.brain.thickening * dtYears);
+            Limb& limb = *decision.limb;
+            const auto target = cambiumTargets.find(&limb);
+            if (target == cambiumTargets.end())
+                continue;
+            const double full = static_cast<double>(target->second) / std::max(1.0e-9, static_cast<double>(limb.GetEquivalentDiameter()));
+            const float scale = static_cast<float>(1.0 + (full - 1.0) * share);
+            grow(limb, limb.GetLength(), limb.GetWidth() * scale, limb.GetThickness() * scale);
         }
-        else
-        {
-            // Roots stay round: they thicken but never flatten.
-            const double rootGrowthDemand = SimulationConstants::BaselineRootGrowthFraction +
-                (1.0 - SimulationConstants::BaselineRootGrowthFraction) * decision.brain.rootGrowth;
-            request.root = true;
-            request.addLength = static_cast<float>(genome.rootGrowthRate * dtYears * rootGrowthDemand);
-            request.addWidth = static_cast<float>(genome.thicknessGrowthRate * decision.brain.thickening * dtYears);
-            request.addThickness = request.addWidth;
-        }
-
-        const Limb& limb = *decision.limb;
-        request.addLength = std::min(request.addLength, std::max(0.0f, SimulationConstants::MaxSegmentLengthM - limb.GetLength()));
-        request.fullCost = std::max(0.0,
-            Geometry::LimbVolume(limb.GetWidth() + request.addWidth, limb.GetThickness() + request.addThickness, limb.GetLength() + request.addLength) - limb.Volume()) *
-            constructionEnergyPerM3;
-        if (request.fullCost <= 0.0)
-            continue;
-
-        requestedEnergy += request.fullCost;
-        requests.push_back(request);
     }
 
-    const float growthScale = requestedEnergy <= 0.0
-        ? 0.0f
-        : static_cast<float>(std::clamp(growthSpendLimit() / requestedEnergy, 0.0, 1.0));
-    if (growthScale > 1.0e-4f)
+    // The brain's growth. Roots lengthen on the root-growth signal, shoots on
+    // elongation; both widen and thicken on their own signals. A segment at
+    // full length asks for no more.
+    struct AxisSignals
     {
-        for (const GrowthRequest& request : requests)
+        Limb* limb;
+        double length;
+        double width;
+        double thickness;
+    };
+    std::vector<AxisSignals> signals;
+    signals.reserve(limbDecisions.size());
+    double demand = 0.0;
+    double signalSum = 0.0;
+    double signalCount = 0.0;
+    for (const LimbDecision& decision : limbDecisions)
+    {
+        Limb& limb = *decision.limb;
+        const bool atFullLength = limb.GetLength() >= SimulationConstants::MaxSegmentLengthM - 1.0e-6f;
+        const double lengthSignal = atFullLength ? 0.0 : (limb.CanPhotosynthesize() ? decision.brain.elongation : decision.brain.rootGrowth);
+        signals.push_back({&limb, lengthSignal, decision.brain.widening, decision.brain.thickening});
+        // Area each axis grows over: the cross-section for length, the side
+        // faces for width and thickness.
+        const double crossSection = static_cast<double>(limb.GetWidth()) * limb.GetThickness();
+        const double widthFaces = static_cast<double>(limb.GetThickness()) * limb.GetLength();
+        const double thicknessFaces = static_cast<double>(limb.GetWidth()) * limb.GetLength();
+        demand += lengthSignal * crossSection + decision.brain.widening * widthFaces + decision.brain.thickening * thicknessFaces;
+        signalSum += lengthSignal + decision.brain.widening + decision.brain.thickening;
+        signalCount += atFullLength ? 2.0 : 3.0;
+    }
+    // How much of what it can spend the tree puts into growth this step: the
+    // mean of its limbs' signals, so a tree whose limbs all ask for little
+    // saves and one whose limbs all ask for much spends it all.
+    const double spend = signalCount <= 0.0 ? 0.0 : growthSpendLimit() * signalSum / signalCount;
+    if (spend > 0.0 && demand > 0.0)
+    {
+        auto resized = [](const AxisSignals& axis, double rate)
         {
-            Limb& limb = *request.limb;
-            const double oldVolume = limb.Volume();
-            limb.SetDimensions(
-                limb.GetLength() + request.addLength * growthScale,
-                limb.GetWidth() + request.addWidth * growthScale,
-                limb.GetThickness() + request.addThickness * growthScale);
-            const double cost = std::max(0.0, limb.Volume() - oldVolume) * constructionEnergyPerM3;
-            energy -= cost;
-            (request.root ? lastStats.rootGrowthCost : lastStats.shootGrowthCost) += cost;
-            (request.root ? lastStats.rootGrowthLength : lastStats.shootGrowthLength) += request.addLength * growthScale;
+            // A segment lengthens up to full length; one already longer keeps its length.
+            const float length = axis.limb->GetLength();
+            return std::array<float, 3>{
+                std::max(length, std::min(SimulationConstants::MaxSegmentLengthM, static_cast<float>(length + rate * axis.length))),
+                static_cast<float>(axis.limb->GetWidth() + rate * axis.width),
+                static_cast<float>(axis.limb->GetThickness() + rate * axis.thickness)};
+        };
+        auto costAt = [&](double rate)
+        {
+            double volume = 0.0;
+            for (const AxisSignals& axis : signals)
+            {
+                const auto size = resized(axis, rate);
+                volume += std::max(0.0, Geometry::LimbVolume(size[1], size[2], size[0]) - axis.limb->Volume());
+            }
+            return volume * constructionEnergyPerM3;
+        };
+        // Metres of growth per unit of signal, to first order; growing in
+        // three directions at once costs a little more, so the rate is
+        // scaled back until it fits.
+        double rate = spend / (demand * SimulationConstants::Pi * 0.25 * constructionEnergyPerM3);
+        if (costAt(rate) > spend)
+        {
+            double low = 0.0;
+            double high = rate;
+            for (int iteration = 0; iteration < 30; ++iteration)
+            {
+                const double middle = 0.5 * (low + high);
+                (costAt(middle) > spend ? high : low) = middle;
+            }
+            rate = low;
+        }
+        for (const AxisSignals& axis : signals)
+        {
+            const auto size = resized(axis, rate);
+            grow(*axis.limb, size[0], size[1], size[2]);
         }
     }
 
@@ -716,9 +776,9 @@ Organism::TraitSample Organism::GetTraitSample() const
     sample.traits[TraitSeedEnergy] = genome.seedInitialEnergy;
     sample.traits[TraitWoodDensity] = genome.woodDensity;
     sample.traits[TraitLeafShare] = lastStats.leafShare;
-    sample.traits[TraitShootGrowth] = genome.shootGrowthRate;
+    sample.traits[TraitShootGrowth] = lastStats.shootGrowthLength;
     sample.traits[TraitRootUptake] = genome.groundExtractionMultiplier;
-    sample.traits[TraitRootGrowth] = genome.rootGrowthRate;
+    sample.traits[TraitRootGrowth] = lastStats.rootGrowthLength;
     sample.traits[TraitRootShare] = lastStats.biomassKg <= 0.0 ? 0.0 : lastStats.rootBiomassKg / lastStats.biomassKg;
     sample.traits[TraitRootLimbs] = lastStats.rootLimbCount;
     sample.traits[TraitSplitBias] = genome.growthBrainWeights[3 * (GrowthBrainInputCount + 1)];
@@ -759,15 +819,11 @@ Organism::Genome Organism::MakeOffspringGenome(std::mt19937& randomGenerator, co
                 gene = fatherGene;
         };
         const Genome& father = *pollenParent;
-        inherit(child.shootGrowthRate, father.shootGrowthRate);
-        inherit(child.rootGrowthRate, father.rootGrowthRate);
         inherit(child.groundExtractionMultiplier, father.groundExtractionMultiplier);
         inherit(child.woodDensity, father.woodDensity);
         inherit(child.bendingStrength, father.bendingStrength);
         inherit(child.xylemConduitDiameterM, father.xylemConduitDiameterM);
         inherit(child.xylemConductiveAreaFraction, father.xylemConductiveAreaFraction);
-        inherit(child.thicknessGrowthRate, father.thicknessGrowthRate);
-        inherit(child.widthGrowthRate, father.widthGrowthRate);
         inherit(child.branchSpawnEnergy, father.branchSpawnEnergy);
         inherit(child.reproductionOverhead, father.reproductionOverhead);
         inherit(child.maxAnnualReproductiveAllocation, father.maxAnnualReproductiveAllocation);
@@ -835,15 +891,11 @@ void Organism::Mutate(Genome& mutated, std::mt19937& randomGenerator)
         return std::clamp(static_cast<float>(mutateDouble(value)), minimum, maximum);
     };
 
-    mutated.shootGrowthRate = mutateDouble(mutated.shootGrowthRate);
-    mutated.rootGrowthRate = mutateDouble(mutated.rootGrowthRate);
     mutated.groundExtractionMultiplier = std::clamp(mutateDouble(mutated.groundExtractionMultiplier), 0.05, 20.0);
     mutated.woodDensity = std::clamp(mutateDouble(mutated.woodDensity), 100.0, 1200.0);
     mutated.bendingStrength = std::clamp(mutateDouble(mutated.bendingStrength), 5.0e6, 200.0e6);
     mutated.xylemConduitDiameterM = std::clamp(mutateDouble(mutated.xylemConduitDiameterM), 8.0e-6, 160.0e-6);
     mutated.xylemConductiveAreaFraction = std::clamp(mutateDouble(mutated.xylemConductiveAreaFraction), 0.03, 0.55);
-    mutated.thicknessGrowthRate = std::clamp(mutateDouble(mutated.thicknessGrowthRate), 0.0005, 0.1);
-    mutated.widthGrowthRate = std::clamp(mutateDouble(mutated.widthGrowthRate), 0.0005, 0.5);
     mutated.branchSpawnEnergy = std::clamp(mutateDouble(mutated.branchSpawnEnergy), 1000.0, 5.0e9);
     mutated.reproductionOverhead = std::clamp(mutateDouble(mutated.reproductionOverhead), 0.0, 1.0e6);
     mutated.maxAnnualReproductiveAllocation = std::clamp(mutateDouble(mutated.maxAnnualReproductiveAllocation), 0.02, 0.60);
@@ -948,7 +1000,7 @@ Organism::BrainOutput Organism::EvaluateGrowthBrain(const std::shared_ptr<Limb>&
     const double branchDepth = static_cast<double>(limb->Depth());
     const double relativeTipHeight = lastStats.maxHeight <= 0.0f
         ? 0.0
-        : std::clamp(static_cast<double>(limb->GetEnd().y / lastStats.maxHeight), 0.0, 1.0);
+        : std::clamp(static_cast<double>((limb->GetEnd().y - limb->GetGroundHeight()) / lastStats.maxHeight), 0.0, 1.0);
 
     const std::array<double, GrowthBrainInputCount> inputs = {
         normalizedEnergy,
@@ -1111,8 +1163,110 @@ double Organism::SkyView(const std::shared_ptr<Limb>& limb, const std::vector<st
 
 double Organism::WindOverturningMoment(const Limb& limb)
 {
-    const float midHeight = std::max(0.0f, (limb.GetRoot().y + limb.GetEnd().y) * 0.5f);
+    const float midHeight = std::max(0.0f, (limb.GetRoot().y + limb.GetEnd().y) * 0.5f - limb.GetGroundHeight());
     return static_cast<double>(glm::length(limb.GetOwnDrag())) * midHeight;
+}
+
+double Organism::LivingWoodVolume(const Limb& limb)
+{
+    return limb.SapwoodVolume(SimulationConstants::SapwoodDepthM);
+}
+
+std::unordered_map<const Limb*, float> Organism::SecondaryGrowthTargets(const std::vector<std::shared_ptr<Limb>>& limbs, double sunExposure) const
+{
+    std::unordered_map<const Limb*, float> targets;
+    if (!SimulationConstants::EnableSecondaryGrowth || limbs.empty())
+        return targets;
+
+    // What each limb's subtree holds, gathered from the tips down. limbs lists
+    // every parent before its children, so a reverse pass sees children first.
+    struct Subtree
+    {
+        double greenArea = 0.0;
+        double absorbingArea = 0.0;
+        float thickestChild = 0.0f;
+        float top = std::numeric_limits<float>::lowest();
+    };
+    std::unordered_map<const Limb*, Subtree> subtrees;
+    subtrees.reserve(limbs.size());
+    double totalGreen = 0.0;
+    double totalAbsorbing = 0.0;
+    for (auto it = limbs.rbegin(); it != limbs.rend(); ++it)
+    {
+        Limb& limb = **it;
+        Subtree& subtree = subtrees[&limb];
+        // One-sided green area: the face a limb shows, less what bark covers.
+        const double narrow = static_cast<double>(std::min(limb.GetWidth(), limb.GetThickness())) / SimulationConstants::GreenTissueThicknessM;
+        const double green = limb.AboveGroundSurfaceArea() / std::max(1.0e-9, limb.SurfaceArea()) *
+            static_cast<double>(limb.GetLength()) * static_cast<double>(std::max(limb.GetWidth(), limb.GetThickness())) / (1.0 + narrow * narrow);
+        subtree.greenArea += green;
+        subtree.absorbingArea += limb.GroundExtractionArea();
+        subtree.top = std::max(subtree.top, std::max(limb.GetRoot().y, limb.GetEnd().y));
+        totalGreen += green;
+        totalAbsorbing += limb.GroundExtractionArea();
+        for (const auto& weakChild : limb.GetChildren())
+        {
+            const auto child = weakChild.lock();
+            if (!child)
+                continue;
+            const Subtree& below = subtrees[child.get()];
+            subtree.greenArea += below.greenArea;
+            subtree.absorbingArea += below.absorbingArea;
+            subtree.top = std::max(subtree.top, below.top);
+            subtree.thickestChild = std::max(subtree.thickestChild, child->GetEquivalentDiameter());
+        }
+    }
+
+    // Diameter whose sapwood shell, at most SapwoodDepthM deep, has this area.
+    const double depth = SimulationConstants::SapwoodDepthM;
+    auto sapwoodDiameter = [depth](double area)
+    {
+        const double solid = std::sqrt(4.0 * area / SimulationConstants::Pi);
+        return solid <= 2.0 * depth ? solid : area / (SimulationConstants::Pi * depth) + depth;
+    };
+    // Greenhill: a column of diameter D buckles under its own weight above
+    // 0.79 (E / rho g)^(1/3) D^(2/3). Stiffness follows density.
+    const double modulus = SimulationConstants::WoodElasticModulusPa * genome.woodDensity / SimulationConstants::BranchWoodDensityKgPerM3;
+    const double greenDensity = genome.woodDensity * SimulationConstants::GreenWoodMassPerDryMass;
+    const double bucklingScale = 0.792 * std::cbrt(modulus / (greenDensity * SimulationConstants::GravityMps2));
+    const double safetyFactor = SimulationConstants::ShadedBucklingSafetyFactor +
+        (SimulationConstants::OpenBucklingSafetyFactor - SimulationConstants::ShadedBucklingSafetyFactor) * std::clamp(sunExposure, 0.0, 1.0);
+
+    const glm::vec3 up(0.0f, 1.0f, 0.0f);
+    for (const auto& pointer : limbs)
+    {
+        Limb& limb = *pointer;
+        // Leaf blades have no cambium.
+        if (limb.GetAspectRatio() >= SimulationConstants::LeafAspectRatio)
+            continue;
+
+        const Subtree& subtree = subtrees[&limb];
+        double sapwoodArea = 0.0;
+        double diameter = static_cast<double>(subtree.thickestChild);
+        if (limb.IsUnderground())
+        {
+            // A root carries water for the whole crown, in proportion to the
+            // absorbing surface beyond it.
+            if (totalAbsorbing > 0.0)
+                sapwoodArea = SimulationConstants::HuberValue * totalGreen * subtree.absorbingArea / totalAbsorbing;
+        }
+        else
+        {
+            sapwoodArea = SimulationConstants::HuberValue * subtree.greenArea;
+            if (glm::dot(limb.GetOrientation() * up, up) >= 0.5f)
+            {
+                const double heightAbove = std::max(0.0, static_cast<double>(subtree.top - limb.GetRoot().y));
+                const double current = static_cast<double>(limb.GetEquivalentDiameter());
+                if (current > 0.0)
+                    limb.designUtilization = std::max(limb.designUtilization, heightAbove / (bucklingScale * std::cbrt(current * current)));
+                diameter = std::max(diameter, std::pow(heightAbove * safetyFactor / bucklingScale, 1.5));
+            }
+        }
+        diameter = std::max(diameter, sapwoodDiameter(sapwoodArea));
+        if (diameter > static_cast<double>(limb.GetEquivalentDiameter()))
+            targets[&limb] = static_cast<float>(diameter);
+    }
+    return targets;
 }
 
 double Organism::XylemConductanceMultiplier() const

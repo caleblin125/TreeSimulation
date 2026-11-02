@@ -99,6 +99,7 @@ private:
         float length;
         float width;
         float thickness;
+        float groundHeight;
     };
 
     struct GhostRoot

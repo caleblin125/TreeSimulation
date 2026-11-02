@@ -10,19 +10,19 @@
 
 namespace
 {
-    double BelowGroundFraction(const glm::vec3& start, const glm::vec3& end)
+    double BelowGroundFraction(const glm::vec3& start, const glm::vec3& end, float ground)
     {
-        if (start.y <= 0.0f && end.y <= 0.0f)
+        if (start.y <= ground && end.y <= ground)
             return 1.0;
-        if (start.y > 0.0f && end.y > 0.0f)
+        if (start.y > ground && end.y > ground)
             return 0.0;
 
         const float denom = end.y - start.y;
         if (std::abs(denom) <= std::numeric_limits<float>::epsilon())
-            return start.y <= 0.0f ? 1.0 : 0.0;
+            return start.y <= ground ? 1.0 : 0.0;
 
-        const double crossingT = std::clamp(static_cast<double>((0.0f - start.y) / denom), 0.0, 1.0);
-        return start.y <= 0.0f ? crossingT : 1.0 - crossingT;
+        const double crossingT = std::clamp(static_cast<double>((ground - start.y) / denom), 0.0, 1.0);
+        return start.y <= ground ? crossingT : 1.0 - crossingT;
     }
 }
 
@@ -37,6 +37,7 @@ Limb::Limb(glm::vec3 root, glm::quat orientation, float initialLength, float ini
     parent(),
     groundExtraction(groundExtraction)
 {
+    groundHeight = root.y;
     end = root + orientation * glm::vec3(0.0f, length, 0.0f);
 }
 
@@ -56,6 +57,7 @@ Limb::Limb(std::weak_ptr<Limb> parent, float attachment, glm::quat rotation, flo
     std::shared_ptr<Limb> parent_ptr = parent.lock();
     root = parent_ptr->root + parent_ptr->orientation*glm::vec3(0.0f, parent_ptr->length * attachment, 0.0f);
     orientation = parent_ptr->orientation * rotation;
+    groundHeight = parent_ptr->groundHeight;
 
     end = root + orientation * glm::vec3(0.0f, length, 0.0f);
 }
@@ -109,7 +111,7 @@ double Limb::UpdateLoads(double density, const Physics::Wind& wind)
 {
     ownWeight = Physics::LimbWeight(width, thickness, length, density);
     const glm::vec3 midpoint = (root + end) * 0.5f;
-    ownDrag = Physics::DragForce(wind, midpoint.y, ProjectedArea(wind.direction));
+    ownDrag = Physics::DragForce(wind, midpoint.y - groundHeight, ProjectedArea(wind.direction));
     carriedWeight = ownWeight;
     carriedForce = Physics::DownwardForce(ownWeight) + ownDrag;
     carriedTorque = glm::cross(midpoint - root, carriedForce);
@@ -181,6 +183,19 @@ double Limb::Volume() const
     return Geometry::LimbVolume(width, thickness, length);
 }
 
+double Limb::SapwoodVolume(double depth) const
+{
+    const double w = static_cast<double>(width);
+    const double t = static_cast<double>(thickness);
+    const double heartwood = std::max(0.0, w - 2.0 * depth) * std::max(0.0, t - 2.0 * depth);
+    return SimulationConstants::Pi * 0.25 * (w * t - heartwood) * static_cast<double>(length);
+}
+
+float Limb::GetEquivalentDiameter() const
+{
+    return std::sqrt(width * thickness);
+}
+
 double Limb::SurfaceArea() const
 {
     return Geometry::LimbLateralArea(width, thickness, length);
@@ -188,12 +203,12 @@ double Limb::SurfaceArea() const
 
 double Limb::AboveGroundSurfaceArea() const
 {
-    return SurfaceArea() * (1.0 - BelowGroundFraction(root, end));
+    return SurfaceArea() * (1.0 - BelowGroundFraction(root, end, groundHeight));
 }
 
 double Limb::UndergroundSurfaceArea() const
 {
-    return SurfaceArea() * BelowGroundFraction(root, end);
+    return SurfaceArea() * BelowGroundFraction(root, end, groundHeight);
 }
 
 double Limb::GroundExtractionArea() const
@@ -203,7 +218,7 @@ double Limb::GroundExtractionArea() const
 
 double Limb::ProjectedArea(const glm::vec3& direction) const
 {
-    return Geometry::LimbProjectedArea(orientation, width, thickness, length, direction) * (1.0 - BelowGroundFraction(root, end));
+    return Geometry::LimbProjectedArea(orientation, width, thickness, length, direction) * (1.0 - BelowGroundFraction(root, end, groundHeight));
 }
 
 double Limb::NutrientPathLength() const
@@ -323,6 +338,16 @@ float Limb::GetAspectRatio() const
 const glm::vec3& Limb::GetRoot() const
 {
     return root;
+}
+
+float Limb::GetGroundHeight() const
+{
+    return groundHeight;
+}
+
+void Limb::SetGroundHeight(float height)
+{
+    groundHeight = height;
 }
 
 const glm::vec3& Limb::GetEnd() const

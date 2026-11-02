@@ -42,6 +42,7 @@ add_library(TreeSimCore
     src/simulation/distributed.cpp
     src/simulation/recording.cpp
     src/simulation/parameters.cpp
+    src/simulation/terrain.cpp
 )
 target_include_directories(TreeSimCore PUBLIC
     include

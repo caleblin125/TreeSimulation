@@ -1,6 +1,7 @@
 #include "renderer.hpp"
 
 #include "simulation/simulation_constants.hpp"
+#include "simulation/terrain.hpp"
 
 #include <math.h>
 #include <glm/gtc/type_ptr.hpp>
@@ -154,7 +155,8 @@ Renderer::Renderer()
     glEnableVertexAttribArray(0);
     glBindVertexArray(0);
 
-    float floorVertices[]={
+    // The ground: one quad when it is flat, the terrain's grid otherwise.
+    std::vector<float> floorVertices = {
         SimulationConstants::SimulationMaxX, 0.0f, SimulationConstants::SimulationMaxZ,
         SimulationConstants::SimulationMinX, 0.0f, SimulationConstants::SimulationMaxZ,
         SimulationConstants::SimulationMinX, 0.0f, SimulationConstants::SimulationMinZ,
@@ -162,12 +164,32 @@ Renderer::Renderer()
         SimulationConstants::SimulationMaxX, 0.0f, SimulationConstants::SimulationMaxZ,
         SimulationConstants::SimulationMaxX, 0.0f, SimulationConstants::SimulationMinZ,
     };
+    if (Terrain::Enabled())
+    {
+        const Terrain::Grid& grid = Terrain::GetGrid();
+        floorVertices.clear();
+        auto node = [&](int x, int z)
+        {
+            floorVertices.push_back(grid.minX + static_cast<float>(x) * grid.cell);
+            floorVertices.push_back(grid.heights[static_cast<std::size_t>(z) * static_cast<std::size_t>(grid.nodesX) + static_cast<std::size_t>(x)]);
+            floorVertices.push_back(grid.minZ + static_cast<float>(z) * grid.cell);
+        };
+        for (int z = 0; z + 1 < grid.nodesZ; ++z)
+        {
+            for (int x = 0; x + 1 < grid.nodesX; ++x)
+            {
+                node(x, z); node(x + 1, z); node(x + 1, z + 1);
+                node(x, z); node(x + 1, z + 1); node(x, z + 1);
+            }
+        }
+    }
+    floorVertexCount = static_cast<GLsizei>(floorVertices.size() / 3);
 
     glGenVertexArrays(1, &floorVAO);
     glGenBuffers(1, &floorVBO);
     glBindVertexArray(floorVAO);
     glBindBuffer(GL_ARRAY_BUFFER, floorVBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(floorVertices), floorVertices, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(floorVertices.size() * sizeof(float)), floorVertices.data(), GL_STATIC_DRAW);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
 
     glEnableVertexAttribArray(0);
@@ -535,20 +557,21 @@ void Renderer::DrawSoilNutrition()
     glBindVertexArray(soilVAO);
 
     const float cellSize = static_cast<float>(SimulationConstants::SoilCellSizeM);
-    constexpr float y = 0.015f;
+    constexpr float lift = 0.015f;
     for (const RenderFrame::SoilCell& cell : soilCells)
     {
         const float x0 = static_cast<float>(cell.cellX) * cellSize;
         const float z0 = static_cast<float>(cell.cellZ) * cellSize;
         const float x1 = x0 + cellSize;
         const float z1 = z0 + cellSize;
+        auto y = [&](float x, float z) { return Terrain::HeightAt(x, z) + lift; };
         const float vertices[] = {
-            x0, y, z0,
-            x1, y, z0,
-            x1, y, z1,
-            x0, y, z0,
-            x1, y, z1,
-            x0, y, z1,
+            x0, y(x0, z0), z0,
+            x1, y(x1, z0), z0,
+            x1, y(x1, z1), z1,
+            x0, y(x0, z0), z0,
+            x1, y(x1, z1), z1,
+            x0, y(x0, z1), z1,
         };
 
         const float resource = std::clamp(cell.resource, 0.0f, 1.0f);
@@ -620,7 +643,7 @@ bool Renderer::Update()
     glBindVertexArray(floorVAO);
     glm::mat4 model = glm::mat4(1.0f);
     shader.SetMat4("uModel", glm::value_ptr(model));
-    glDrawArrays(GL_TRIANGLES, 0, 6);
+    glDrawArrays(GL_TRIANGLES, 0, floorVertexCount);
     DrawSoilNutrition();
 
     glBindVertexArray(limbVAO);

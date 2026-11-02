@@ -3,6 +3,7 @@
 #include "simulation/physics.hpp"
 #include "simulation/quadtree.hpp"
 #include "simulation/simulation_constants.hpp"
+#include "simulation/terrain.hpp"
 #include "simulation/world.hpp"
 
 #include <cmath>
@@ -22,6 +23,33 @@
 #include <vector>
 
 #include <glm/gtc/quaternion.hpp>
+
+// Growth has no rate genes: a limb grows as its brain signals and the tree's
+// energy allow. These silence the signals so a test can hold a tree's shape.
+void SilenceOutputs(Organism::Genome& genome, std::initializer_list<std::size_t> outputs)
+{
+    for (std::size_t output : outputs)
+    {
+        for (std::size_t input = 0; input <= Organism::GrowthBrainInputCount; ++input)
+            genome.growthBrainWeights[output * (Organism::GrowthBrainInputCount + 1) + input] = 0.0;
+        genome.growthBrainWeights[output * (Organism::GrowthBrainInputCount + 1)] = -60.0;
+    }
+}
+
+// Turns the cambium off while it lives, for tests that hand a tree a large
+// stock of energy it would otherwise spend on girth.
+struct WithoutCambium
+{
+    bool saved = SimulationConstants::EnableSecondaryGrowth;
+    WithoutCambium() { SimulationConstants::EnableSecondaryGrowth = false; }
+    ~WithoutCambium() { SimulationConstants::EnableSecondaryGrowth = saved; }
+};
+
+// No lengthening, widening or thickening; the cambium still works.
+void FreezeGrowth(Organism::Genome& genome)
+{
+    SilenceOutputs(genome, {0, 1, 2, 7});
+}
 
 namespace
 {
@@ -375,6 +403,9 @@ void TestLimbBrainControlsSplitAndReproduction()
 
 void TestReproductionGates()
 {
+    // The fertile stems are tall and thin, and would put their whole stock
+    // into girth before they could fruit.
+    const WithoutCambium withoutCambium;
     Organism seedling(3, glm::vec3(0.0f), glm::identity<glm::quat>());
     seedling.Simulate(SimulationConstants::DefaultTimeStepYears);
     Expect(seedling.Reproduce() == 0, "default young seedling cannot reproduce");
@@ -382,8 +413,7 @@ void TestReproductionGates()
     // A seed costs four times its reserve, so give the parent far more than one seed's worth.
     Organism::Genome fertileGenome = ReproductiveGenome();
     fertileGenome.seedInitialEnergy = 1'000.0;
-    fertileGenome.shootGrowthRate = 0.0;
-    fertileGenome.rootGrowthRate = 0.0;
+    FreezeGrowth(fertileGenome);
     fertileGenome.initialWidth = fertileGenome.initialThickness = 0.005f;
     Organism fertile(4, glm::vec3(0.0f), glm::identity<glm::quat>(), fertileGenome, 1.0e6);
     fertile.Simulate(SimulationConstants::DefaultTimeStepYears);
@@ -422,16 +452,13 @@ void TestReproductionBudgetAccumulatesAcrossSubsteps()
     genome.initialRootLength = 3.0f;
     genome.initialWidth = 0.3f;
     genome.initialThickness = 0.008f;
-    genome.shootGrowthRate = 0.0;
-    genome.rootGrowthRate = 0.0;
+    FreezeGrowth(genome);
     genome.woodDensity = 100.0;
     genome.bendingStrength = 1.0e12;
     genome.branchSpawnEnergy = 1.0e12;
     genome.minReproductionAgeYears = 0.0f;
     genome.minReproductionHeightM = 0.5f;
     genome.minReproductionReserve = 100'000.0;
-    genome.thicknessGrowthRate = 0.0;
-    genome.widthGrowthRate = 0.0;
 
     Organism organism(17, glm::vec3(0.0f), glm::identity<glm::quat>(), genome, 1'000'000.0);
     float remainingYears = 1.0f;
@@ -448,9 +475,10 @@ void TestReproductionBudgetAccumulatesAcrossSubsteps()
 
 void TestDefaultProtoTreeCanEventuallyReproduce()
 {
-    // A leafless founder grows slowly; it should still fruit within its first decades.
+    // A leafless founder grows slowly, and its trunk has to thicken as it
+    // rises; it should still fruit within its first decades.
     Organism organism(18, glm::vec3(0.0f), glm::identity<glm::quat>());
-    float remainingYears = 20.0f;
+    float remainingYears = 25.0f;
     bool alive = true;
     while (remainingYears > 0.0f)
     {
@@ -681,8 +709,7 @@ void TestRootsBranchAndCostUpkeep()
         Expect(uptake.position.y < 0.0f, "root branches stay below ground");
 
     Organism::Genome idleGenome;
-    idleGenome.shootGrowthRate = 0.0;
-    idleGenome.rootGrowthRate = 0.0;
+    FreezeGrowth(idleGenome);
     idleGenome.initialWidth = idleGenome.initialThickness = 0.02f;
     idleGenome.branchSpawnEnergy = 1.0e12;
     Organism::Genome longRootGenome = idleGenome;
@@ -698,8 +725,7 @@ void TestRootsBranchAndCostUpkeep()
 void TestTopHeavyTreesUproot()
 {
     Organism::Genome genome;
-    genome.shootGrowthRate = 0.0;
-    genome.rootGrowthRate = 0.0;
+    FreezeGrowth(genome);
     genome.initialWidth = genome.initialThickness = 0.04f;
     genome.initialShootLength = 1.0f;
     genome.branchSpawnEnergy = 1.0e12;
@@ -827,8 +853,7 @@ void TestExternalSunlightOcclusionReducesPhotosynthesis()
     targetGenome.initialShootLength = 1.0f;
     targetGenome.initialRootLength = 0.5f;
     targetGenome.initialWidth = targetGenome.initialThickness = 0.1f;
-    targetGenome.shootGrowthRate = 0.0;
-    targetGenome.rootGrowthRate = 0.0;
+    FreezeGrowth(targetGenome);
     targetGenome.branchSpawnEnergy = 1.0e12;
     targetGenome.bendingStrength = 1.0e12;
 
@@ -861,7 +886,6 @@ void TestWidthAndThicknessGrowIndependently()
     Organism::Genome bladeGenome;
     bladeGenome.seedInitialEnergy = 1'000'000.0;
     bladeGenome.branchSpawnEnergy = 1.0e12;
-    bladeGenome.widthGrowthRate = 0.2;
     bladeGenome.growthBrainWeights[1 * (Organism::GrowthBrainInputCount + 1)] = -12.0;
     bladeGenome.growthBrainWeights[7 * (Organism::GrowthBrainInputCount + 1)] = 12.0;
 
@@ -872,6 +896,57 @@ void TestWidthAndThicknessGrowIndependently()
     const std::shared_ptr<Limb> shoot = blade.GetLimbs().front().lock();
     Expect(shoot && shoot->GetWidth() > 4.0f * shoot->GetThickness(), "a shoot that widens without thickening becomes a blade");
     Expect(blade.GetLastStats().leafCount >= 1 && blade.GetLastStats().leafShare > 0.5, "blades are counted as leaves");
+}
+
+void TestGrowthAxesAreIndependentAndUncapped()
+{
+    // Each axis grows on its own signal: with only one switched on, a limb
+    // changes along that axis alone, roots as well as shoots.
+    const WithoutCambium withoutCambium;
+    auto growOnly = [](std::size_t output, bool root)
+    {
+        Organism::Genome genome;
+        genome.seedInitialEnergy = 1.0e5;
+        genome.initialShootLength = genome.initialRootLength = 0.1f;
+        genome.branchSpawnEnergy = 1.0e12;
+        FreezeGrowth(genome);
+        // Shoots lengthen on elongation, roots on root growth.
+        const std::size_t signal = output == 0 && root ? 2 : output;
+        genome.growthBrainWeights[signal * (Organism::GrowthBrainInputCount + 1)] = 12.0;
+        Organism organism(90, glm::vec3(0.0f), glm::identity<glm::quat>(), genome);
+        organism.Simulate(SimulationConstants::MaxStableStepYears);
+        const std::vector<std::shared_ptr<Limb>> limbs = LockLimbs(organism.GetLimbs());
+        const auto limb = std::find_if(limbs.begin(), limbs.end(), [&](const auto& candidate) { return candidate->CanPhotosynthesize() != root; });
+        return glm::vec3((*limb)->GetWidth(), (*limb)->GetLength(), (*limb)->GetThickness());
+    };
+    const glm::vec3 start(SimulationConstants::InitialLimbWidthM, 0.1f, SimulationConstants::InitialLimbThicknessM);
+    for (const bool root : {false, true})
+    {
+        const std::string part = root ? "root" : "shoot";
+        const glm::vec3 lengthened = growOnly(0, root);
+        const glm::vec3 widened = growOnly(7, root);
+        const glm::vec3 thickened = growOnly(1, root);
+        Expect(lengthened.y > start.y && lengthened.x == start.x && lengthened.z == start.z, "a " + part + " can lengthen alone");
+        Expect(widened.x > start.x && widened.y == start.y && widened.z == start.z, "a " + part + " can widen alone");
+        Expect(thickened.z > start.z && thickened.x == start.x && thickened.y == start.y, "a " + part + " can thicken alone");
+    }
+
+    // No ceiling on the rate: a tree with more to spend grows more, here far
+    // past the old 2 cm a year in a single week.
+    auto widenWith = [](double energy)
+    {
+        Organism::Genome genome;
+        genome.branchSpawnEnergy = 1.0e12;
+        FreezeGrowth(genome);
+        genome.growthBrainWeights[7 * (Organism::GrowthBrainInputCount + 1)] = 12.0;
+        Organism organism(91, glm::vec3(0.0f), glm::identity<glm::quat>(), genome, energy);
+        organism.Simulate(SimulationConstants::MaxStableStepYears);
+        return LockLimbs(organism.GetLimbs()).front()->GetWidth();
+    };
+    const float modest = widenWith(1.0e5);
+    const float rich = widenWith(1.0e7);
+    Expect(rich > modest, "more energy buys more growth");
+    Expect(rich - SimulationConstants::InitialLimbWidthM > 0.02f, "growth is not capped at a fixed rate");
 }
 
 void TestLeafShadowDependsOnOrientation()
@@ -892,8 +967,7 @@ void TestStormsBreakTallThinStems()
     poleGenome.initialShootLength = 6.0f;
     poleGenome.initialRootLength = 3.0f;
     poleGenome.initialWidth = poleGenome.initialThickness = 0.01f;
-    poleGenome.shootGrowthRate = 0.0;
-    poleGenome.rootGrowthRate = 0.0;
+    FreezeGrowth(poleGenome);
     poleGenome.branchSpawnEnergy = 1.0e12;
 
     Organism calm(61, glm::vec3(0.0f), glm::identity<glm::quat>(), poleGenome);
@@ -925,8 +999,7 @@ void TestBranchedCrownsCarryMoreSeed()
 {
     Organism::Genome genome = ReproductiveGenome();
     genome.seedInitialEnergy = 1'000.0;
-    genome.shootGrowthRate = 0.0;
-    genome.rootGrowthRate = 0.0;
+    FreezeGrowth(genome);
     // A broad green blade earns a budget far bigger than one tip can spend,
     // on a root long enough to hold it.
     genome.initialWidth = 0.15f;
@@ -993,8 +1066,7 @@ void TestSunTrackAndSeasons()
 
     Organism::Genome genome;
     genome.seedInitialEnergy = 1'000'000.0;
-    genome.shootGrowthRate = 0.0;
-    genome.rootGrowthRate = 0.0;
+    FreezeGrowth(genome);
     genome.branchSpawnEnergy = 1.0e12;
     Organism::Environment summerDay;
     summerDay.yearFraction = 0.25f;
@@ -1014,8 +1086,7 @@ void TestSkyLightReachesShadedLimbs()
     Organism::Genome genome;
     genome.seedInitialEnergy = 1'000'000.0;
     genome.initialShootLength = 1.0f;
-    genome.shootGrowthRate = 0.0;
-    genome.rootGrowthRate = 0.0;
+    FreezeGrowth(genome);
     genome.branchSpawnEnergy = 1.0e12;
 
     Organism open(72, glm::vec3(0.0f), glm::identity<glm::quat>(), genome);
@@ -1046,8 +1117,7 @@ void TestWaterLimitsLeaves()
     genome.seedInitialEnergy = 1'000'000.0;
     genome.initialShootLength = 1.0f;
     genome.initialRootLength = 0.2f;
-    genome.shootGrowthRate = 0.0;
-    genome.rootGrowthRate = 0.0;
+    FreezeGrowth(genome);
     genome.branchSpawnEnergy = 1.0e12;
     genome.initialWidth = 0.3f;
     genome.initialThickness = 0.002f;
@@ -1127,14 +1197,12 @@ void TestLightFieldMatchesDirectTracing()
     blockerGenome.initialShootLength = 3.0f;
     blockerGenome.initialWidth = blockerGenome.initialThickness = 0.3f;
     blockerGenome.bendingStrength = 1.0e12;
+    FreezeGrowth(blockerGenome);
     Organism blocker(80, glm::vec3(-0.35f, 0.0f, -0.2f), glm::identity<glm::quat>(), blockerGenome);
     blocker.Simulate(SimulationConstants::MaxStableStepYears);
 
     Organism::Genome targetGenome = genome;
-    targetGenome.shootGrowthRate = 0.0;
-    targetGenome.rootGrowthRate = 0.0;
-    targetGenome.thicknessGrowthRate = 0.0;
-    targetGenome.widthGrowthRate = 0.0;
+    FreezeGrowth(targetGenome);
     targetGenome.branchSpawnEnergy = 1.0e12;
     Organism direct(81, glm::vec3(0.0f), glm::identity<glm::quat>(), targetGenome);
     Organism traced(81, glm::vec3(0.0f), glm::identity<glm::quat>(), targetGenome);
@@ -1193,8 +1261,7 @@ void TestBarkStopsPhotosynthesis()
     Organism::Genome genome;
     genome.seedInitialEnergy = 1.0e6;
     genome.initialShootLength = 1.0f;
-    genome.shootGrowthRate = 0.0;
-    genome.rootGrowthRate = 0.0;
+    FreezeGrowth(genome);
     genome.branchSpawnEnergy = 1.0e12;
     genome.bendingStrength = 1.0e12;
     genome.initialWidth = genome.initialThickness = 0.004f;
@@ -1214,8 +1281,7 @@ void TestShadeCompoundsWithLayers()
     Organism::Genome genome;
     genome.seedInitialEnergy = 1.0e6;
     genome.initialShootLength = 1.0f;
-    genome.shootGrowthRate = 0.0;
-    genome.rootGrowthRate = 0.0;
+    FreezeGrowth(genome);
     genome.branchSpawnEnergy = 1.0e12;
 
     // Screens across each point of the sun's track: one layer, then three.
@@ -1294,6 +1360,109 @@ void TestHiddenLayerAndBranchClasses()
     }
     Expect(sawSideBud && sawLeader, "the trunk grew both side buds and a leader");
 }
+}
+
+void TestSapwoodRespiresHeartwoodDoesNot()
+{
+    const double depth = 0.04;
+    Limb twig(glm::vec3(0.0f), glm::identity<glm::quat>(), 1.0f, 0.02f, 0.02f);
+    ExpectNear(twig.SapwoodVolume(depth), twig.Volume(), 1.0e-12, "a twig thinner than the sapwood depth is all sapwood");
+
+    Limb trunk(glm::vec3(0.0f), glm::identity<glm::quat>(), 1.0f, 0.4f, 0.4f);
+    const double shell = SimulationConstants::Pi * 0.25 * (0.4 * 0.4 - 0.32 * 0.32);
+    ExpectNear(trunk.SapwoodVolume(depth), shell, 1.0e-6, "a trunk's living wood is the outer shell only");
+    Expect(Organism::LivingWoodVolume(trunk) < 0.5 * trunk.Volume(), "most of a thick trunk does not respire");
+}
+
+void TestSecondaryGrowthKeepsStemsStout()
+{
+    // The same founder grown with and without a cambium: with it, the trunk
+    // base ends thicker for its height.
+    auto grow = [](bool cambium)
+    {
+        const bool saved = SimulationConstants::EnableSecondaryGrowth;
+        SimulationConstants::EnableSecondaryGrowth = cambium;
+        Organism::Genome genome;
+        genome.bendingStrength = 1.0e12;
+        Organism organism(31, glm::vec3(0.0f), glm::identity<glm::quat>(), genome);
+        for (float years = 0.0f; years < 20.0f; years += SimulationConstants::MaxStableStepYears)
+            organism.Simulate(SimulationConstants::MaxStableStepYears);
+        SimulationConstants::EnableSecondaryGrowth = saved;
+        const Organism::RenderSnapshot snapshot = organism.GetRenderSnapshot();
+        const Limb::LimbData& base = snapshot.limbs.front();
+        return snapshot.stats.maxHeight / std::sqrt(base.width * base.thickness);
+    };
+    const double without = grow(false);
+    const double with = grow(true);
+    Expect(with < without, "secondary growth lowers a stem's height to diameter ratio");
+
+    // Greenhill: a stem standing H above its base needs D >= (H * safety / C)^(3/2).
+    // A bare 6 m pole of twig wood is far too slender, and is told to thicken.
+    Organism pole(32, glm::vec3(0.0f), glm::identity<glm::quat>());
+    const auto targets = [&]()
+    {
+        std::vector<std::shared_ptr<Limb>> limbs{std::make_shared<Limb>(glm::vec3(0.0f), glm::identity<glm::quat>(), 6.0f, 0.01f, 0.01f)};
+        auto found = pole.SecondaryGrowthTargets(limbs, 1.0);
+        return std::make_pair(found.empty() ? 0.0f : found.begin()->second, limbs.front()->designUtilization);
+    }();
+    const double modulus = SimulationConstants::WoodElasticModulusPa;
+    const double rhoG = SimulationConstants::BranchWoodDensityKgPerM3 * SimulationConstants::GreenWoodMassPerDryMass * SimulationConstants::GravityMps2;
+    const double expected = std::pow(6.0 * SimulationConstants::OpenBucklingSafetyFactor / (0.792 * std::cbrt(modulus / rhoG)), 1.5);
+    ExpectNear(targets.first, expected, 1.0e-4, "an upright pole thickens to its buckling diameter");
+    Expect(targets.second > 1.0, "a pole past its buckling height reports overload to its growth brain");
+}
+
+void TestTerrainShapesSites()
+{
+    const bool enabled = SimulationConstants::TerrainEnabled;
+    const float plot = SimulationConstants::PlotSizeM;
+    SimulationConstants::PlotSizeM = 80.0f;
+    SimulationConstants::TerrainEnabled = false;
+    SimulationConstants::ApplyDerivedParameters();
+    Expect(!Terrain::Enabled() && Terrain::HeightAt(3.0f, -7.0f) == 0.0f, "terrain off leaves the ground flat at 0");
+    Expect(Terrain::SiteAt(3.0f, -7.0f).water == 1.0 && Terrain::SiteAt(3.0f, -7.0f).wind == 1.0, "flat ground changes nothing");
+
+    SimulationConstants::TerrainEnabled = true;
+    SimulationConstants::ApplyDerivedParameters();
+    const Terrain::Grid& grid = Terrain::GetGrid();
+    const auto [lowest, highest] = std::minmax_element(grid.heights.begin(), grid.heights.end());
+    ExpectNear(*lowest, 0.0, 1.0e-4, "terrain's lowest point is at 0");
+    ExpectNear(*highest, SimulationConstants::TerrainReliefM, 1.0e-3, "terrain spans its relief");
+
+    // Across the plot, high ground is windier and drier than low ground.
+    double highWind = 0.0, lowWind = 0.0, highWater = 0.0, lowWater = 0.0;
+    int high = 0, low = 0;
+    for (float x = -38.0f; x <= 38.0f; x += 2.0f)
+    {
+        for (float z = -38.0f; z <= 38.0f; z += 2.0f)
+        {
+            const Terrain::Site site = Terrain::SiteAt(x, z);
+            const bool upper = site.height > 0.5f * SimulationConstants::TerrainReliefM;
+            (upper ? highWind : lowWind) += site.wind;
+            (upper ? highWater : lowWater) += site.water;
+            (upper ? high : low)++;
+        }
+    }
+    Expect(high > 0 && low > 0, "terrain has both high and low ground");
+    Expect(highWind / high > lowWind / low, "wind is stronger on high ground");
+    Expect(highWater / high < lowWater / low, "water collects on low ground");
+
+    // A tree on a hillside stands on the ground there and its shoot is above it.
+    World world(5);
+    const glm::vec3 spot(12.0f, 0.0f, -9.0f);
+    world.MakeOrganism(spot, glm::identity<glm::quat>());
+    world.Simulate(SimulationConstants::MaxStableStepYears);
+    const std::vector<Organism::RenderSnapshot> snapshots = world.GetRenderSnapshots();
+    Expect(snapshots.size() == 1, "tree on terrain survives its first step");
+    if (!snapshots.empty())
+    {
+        ExpectNear(snapshots.front().limbs.front().root.y, Terrain::HeightAt(spot.x, spot.z), 1.0e-4, "tree is rooted at the ground's height");
+        Expect(snapshots.front().stats.leafArea > 0.0, "tree on terrain catches light above the ground");
+    }
+
+    SimulationConstants::TerrainEnabled = enabled;
+    SimulationConstants::PlotSizeM = plot;
+    SimulationConstants::ApplyDerivedParameters();
 }
 
 void TestParameterFiles()
@@ -1377,6 +1546,7 @@ int main()
     TestDeadPlantsBecomeSoilDetritus();
     TestExternalSunlightOcclusionReducesPhotosynthesis();
     TestWidthAndThicknessGrowIndependently();
+    TestGrowthAxesAreIndependentAndUncapped();
     TestLeafShadowDependsOnOrientation();
     TestStormsBreakTallThinStems();
     TestJuvenilesDoNotSaveForSeed();
@@ -1392,6 +1562,9 @@ int main()
     TestShadeCompoundsWithLayers();
     TestHiddenLayerAndBranchClasses();
 
+    TestSapwoodRespiresHeartwoodDoesNot();
+    TestSecondaryGrowthKeepsStemsStout();
+    TestTerrainShapesSites();
     TestParameterFiles();
 
     if (failures > 0)

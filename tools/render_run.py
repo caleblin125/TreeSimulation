@@ -95,7 +95,47 @@ def read_run(run):
         params = json.loads(params_file.read_text())
         soil_cell = float(params.get("soil", {}).get("SoilCellSizeM", soil_cell))
         leaf_aspect = float(params.get("growth", {}).get("LeafAspectRatio", leaf_aspect))
-    return {"plot": plot, "soil_cell": soil_cell, "leaf_aspect": leaf_aspect}
+    return {"plot": plot, "soil_cell": soil_cell, "leaf_aspect": leaf_aspect, "terrain": read_terrain(run / "terrain.bin")}
+
+
+def read_terrain(path):
+    """The heightfield a run with terrain writes, as (min x, min z, cell,
+    heights[z, x]); None for flat ground at height 0."""
+    if not path.exists():
+        return None
+    data = path.read_bytes()
+    if data[:8] != b"TSTERR01":
+        raise ValueError(f"{path} is not a TreeSim terrain file")
+    nx, nz = np.frombuffer(data, "<i4", count=2, offset=8)
+    min_x, min_z, cell = np.frombuffer(data, "<f4", count=3, offset=16)
+    heights = np.frombuffer(data, "<f4", count=int(nx) * int(nz), offset=28).reshape(int(nz), int(nx))
+    return float(min_x), float(min_z), float(cell), heights
+
+
+def height_at(terrain, x, z):
+    """Ground height at x, z, interpolated like the simulation does."""
+    if terrain is None:
+        return np.zeros(np.broadcast(x, z).shape)
+    min_x, min_z, cell, heights = terrain
+    nz, nx = heights.shape
+    gx = np.clip((np.asarray(x, np.float64) - min_x) / cell, 0, nx - 1)
+    gz = np.clip((np.asarray(z, np.float64) - min_z) / cell, 0, nz - 1)
+    x0 = np.minimum(gx.astype(np.int64), nx - 2)
+    z0 = np.minimum(gz.astype(np.int64), nz - 2)
+    tx, tz = gx - x0, gz - z0
+    a = heights[z0, x0] + (heights[z0, x0 + 1] - heights[z0, x0]) * tx
+    b = heights[z0 + 1, x0] + (heights[z0 + 1, x0 + 1] - heights[z0 + 1, x0]) * tx
+    return a + (b - a) * tz
+
+
+def limb_ground(plants, limbs):
+    """Each limb's ground height: that of its tree's base, the first limb's root."""
+    if len(limbs) == 0:
+        return np.zeros(0)
+    counts = plants["limb_count"].astype(np.int64)
+    first = np.concatenate([[0], np.cumsum(counts)[:-1]])
+    base = np.where(counts > 0, limbs["root"][np.minimum(first, len(limbs) - 1), 1], 0.0)
+    return np.repeat(base, counts)
 
 
 def read_frame(path):
@@ -163,11 +203,24 @@ def line_widths(limbs, points_per_metre, minimum=0.25):
     return np.clip(breadth * points_per_metre, minimum, 40.0)
 
 
-def draw_side(ax, plot, limbs, ends, colors, widths, bounds, time, show_roots, slab):
+def draw_side(ax, plot, limbs, ends, ground, colors, widths, bounds, time, show_roots, slab, terrain):
     ax.set_facecolor("#dfe9f2")
     lo, hi = bounds
-    ax.axhspan(lo, 0.0, color="#cdbb9f", zorder=0)
-    keep = np.ones(len(limbs), bool) if show_roots else limbs["root"][:, 1] >= -1e-4
+    if terrain is None:
+        ax.axhspan(lo, 0.0, color="#cdbb9f", zorder=0)
+    else:
+        # The ground's profile through the middle of a slab. Across the whole
+        # plot, solid up to its lowest line and see-through up to its skyline,
+        # so trees on the near slopes still show.
+        xs = np.linspace(plot[0], plot[1], 400)
+        if slab:
+            ax.fill_between(xs, lo, height_at(terrain, xs, 0.5 * (plot[0] + plot[1])), color="#cdbb9f", zorder=0)
+        else:
+            zs = np.linspace(plot[0], plot[1], 100)
+            heights = height_at(terrain, xs[None, :], zs[:, None])
+            ax.fill_between(xs, lo, heights.min(axis=0), color="#cdbb9f", zorder=0)
+            ax.fill_between(xs, heights.min(axis=0), heights.max(axis=0), color="#cdbb9f", alpha=0.35, linewidth=0, zorder=0)
+    keep = np.ones(len(limbs), bool) if show_roots else limbs["root"][:, 1] >= ground - 1e-4
     if slab:
         keep &= np.abs(limbs["root"][:, 2] - 0.5 * (plot[0] + plot[1])) <= 0.5 * slab
     # Far limbs first, so nearer ones (larger z) are drawn over them.
@@ -182,7 +235,7 @@ def draw_side(ax, plot, limbs, ends, colors, widths, bounds, time, show_roots, s
     ax.set_title(f"Side view, year {time:.1f}" + (f" ({slab:g} m deep slice)" if slab else ""))
 
 
-def draw_top(ax, plot, soil_cell, plants, limbs, ends, colors, widths, soil, time):
+def draw_top(ax, plot, soil_cell, plants, limbs, ends, ground, colors, widths, soil, time, terrain):
     if len(soil):
         cells_x = np.arange(int(np.floor(plot[0] / soil_cell)), int(np.floor(plot[1] / soil_cell)) + 1)
         cells_z = cells_x
@@ -193,9 +246,14 @@ def draw_top(ax, plot, soil_cell, plants, limbs, ends, colors, widths, soil, tim
         grid[iz[ok], ix[ok]] = soil["resource"][ok]
         extent = (cells_x[0] * soil_cell, (cells_x[-1] + 1) * soil_cell, cells_z[0] * soil_cell, (cells_z[-1] + 1) * soil_cell)
         ax.imshow(grid, origin="lower", extent=extent, cmap="YlGn", vmin=0, vmax=1, alpha=0.5, zorder=0)
-    shoots = np.flatnonzero(limbs["root"][:, 1] >= -1e-4)
+    if terrain is not None:
+        min_x, min_z, cell, heights = terrain
+        xs = min_x + cell * np.arange(heights.shape[1])
+        zs = min_z + cell * np.arange(heights.shape[0])
+        ax.contour(xs, zs, heights, levels=10, colors="#7a6a52", linewidths=0.5, alpha=0.6, zorder=0.5)
+    shoots = np.flatnonzero(limbs["root"][:, 1] >= ground - 1e-4)
     # Lower limbs first, so the canopy is drawn over the understorey.
-    idx = shoots[np.argsort(np.maximum(limbs["root"][shoots, 1], ends[shoots, 1]))]
+    idx = shoots[np.argsort(np.maximum(limbs["root"][shoots, 1], ends[shoots, 1]) - ground[shoots])]
     segments = np.stack([limbs["root"][idx][:, [0, 2]], ends[idx][:, [0, 2]]], axis=1)
     ax.add_collection(LineCollection(segments, colors=colors[idx], linewidths=widths[idx], capstyle="round"))
     # Upright stems vanish seen from above, so mark each tree's base too.
@@ -210,10 +268,10 @@ def draw_top(ax, plot, soil_cell, plants, limbs, ends, colors, widths, soil, tim
     ax.set_aspect("equal")
     ax.set_xlabel("x (m)")
     ax.set_ylabel("z (m)")
-    ax.set_title(f"Top view, year {time:.1f} (soil resource: yellow poor, green rich)")
+    ax.set_title(f"Top view, year {time:.1f} (soil resource: yellow poor, green rich" + ("; height contours)" if terrain is not None else ")"))
 
 
-def draw_corner(ax, plot, soil_cell, limbs, ends, colors, soil, bounds, options, turn):
+def draw_corner(ax, plot, soil_cell, limbs, ends, ground, colors, soil, bounds, options, turn):
     """Perspective view from above one corner of the plot, drawn as projected
     line segments so it stays fast for large forests."""
     span = plot[1] - plot[0]
@@ -223,7 +281,9 @@ def draw_corner(ax, plot, soil_cell, limbs, ends, colors, soil, bounds, options,
     elevation = np.radians(options["elevation"])
     # Azimuth 0 looks in from the (min x, max z) corner; --orbit turns the camera over the run.
     azimuth = np.radians(options["azimuth"] + options["orbit"] * turn)
-    target = np.array([centre, 0.15 * top, centre])
+    terrain = options["terrain"]
+    base = 0.0 if terrain is None else float(terrain[3].min())
+    target = np.array([centre, base + 0.15 * (top - base), centre])
     # Far enough back that the plot's diagonal fits the field of view.
     distance = options["distance"] * 0.75 * span * np.sqrt(2.0) / np.tan(0.5 * fov)
     direction = np.array([-np.sin(np.pi / 4 + azimuth) * np.cos(elevation), np.sin(elevation), np.cos(np.pi / 4 + azimuth) * np.cos(elevation)])
@@ -243,23 +303,44 @@ def draw_corner(ax, plot, soil_cell, limbs, ends, colors, soil, bounds, options,
     aspect = options["aspect"]
 
     # Ground: the soil grid as projected quads, far cells first. The grid's
-    # last row and column start on the plot's edge, so they are dropped.
-    soil = soil[(soil["x"] * soil_cell < plot[1]) & (soil["z"] * soil_cell < plot[1])]
-    if len(soil):
-        x0 = soil["x"] * soil_cell
-        z0 = soil["z"] * soil_cell
+    # last row and column start on the plot's edge, so they are dropped. On
+    # terrain the quads follow the heightfield's grid and are hill-shaded.
+    if terrain is None:
+        soil = soil[(soil["x"] * soil_cell < plot[1]) & (soil["z"] * soil_cell < plot[1])]
+        x0 = (soil["x"] * soil_cell).astype(np.float64)
+        z0 = (soil["z"] * soil_cell).astype(np.float64)
+        cell = soil_cell
+        shade = plt.get_cmap("YlGn")(0.15 + 0.6 * np.clip(soil["resource"], 0, 1))
+    else:
+        min_x, min_z, cell, heights = terrain
+        zi, xi = np.meshgrid(np.arange(heights.shape[0] - 1), np.arange(heights.shape[1] - 1), indexing="ij")
+        x0 = (min_x + cell * xi).ravel()
+        z0 = (min_z + cell * zi).ravel()
+        # Soil where it was recorded, the undisturbed middle elsewhere.
+        resource = np.full(x0.shape, 0.6)
+        if len(soil):
+            lookup = {(int(x), int(z)): float(r) for x, z, r in zip(soil["x"], soil["z"], soil["resource"])}
+            keys = zip(np.floor((x0 + 0.5 * cell) / soil_cell).astype(int), np.floor((z0 + 0.5 * cell) / soil_cell).astype(int))
+            resource = np.array([lookup.get(key, 0.6) for key in keys])
+        dhdx = (heights[:-1, 1:] - heights[:-1, :-1]).ravel() / cell
+        dhdz = (heights[1:, :-1] - heights[:-1, :-1]).ravel() / cell
+        normal = np.stack([-dhdx, np.ones_like(dhdx), -dhdz], -1)
+        normal /= np.linalg.norm(normal, axis=1, keepdims=True)
+        light = np.clip(normal @ np.array([-0.5, 0.8, -0.3]) / np.linalg.norm([-0.5, 0.8, -0.3]), 0, 1)
+        shade = plt.get_cmap("YlGn")(0.15 + 0.6 * np.clip(resource, 0, 1))
+        shade[:, :3] *= (0.55 + 0.45 * light)[:, None]
+    if len(x0):
         corners = np.stack([
-            np.stack([x0, np.zeros_like(x0), z0], -1),
-            np.stack([x0 + soil_cell, np.zeros_like(x0), z0], -1),
-            np.stack([x0 + soil_cell, np.zeros_like(x0), z0 + soil_cell], -1),
-            np.stack([x0, np.zeros_like(x0), z0 + soil_cell], -1),
+            np.stack([x0, height_at(terrain, x0, z0), z0], -1),
+            np.stack([x0 + cell, height_at(terrain, x0 + cell, z0), z0], -1),
+            np.stack([x0 + cell, height_at(terrain, x0 + cell, z0 + cell), z0 + cell], -1),
+            np.stack([x0, height_at(terrain, x0, z0 + cell), z0 + cell], -1),
         ], axis=1).astype(np.float64)
         quads, depth = project(corners)
         order = np.argsort(-depth.mean(axis=1))
-        shade = plt.get_cmap("YlGn")(0.15 + 0.6 * np.clip(soil["resource"], 0, 1))
         ax.add_collection(PolyCollection(quads[order], facecolors=shade[order], edgecolors="none", zorder=0))
 
-    shoots = np.flatnonzero(limbs["root"][:, 1] >= -1e-4)
+    shoots = np.flatnonzero(limbs["root"][:, 1] >= ground - 1e-4)
     a, depth_a = project(limbs["root"][shoots])
     b, depth_b = project(ends[shoots])
     depth = 0.5 * (depth_a + depth_b)
@@ -274,7 +355,7 @@ def draw_corner(ax, plot, soil_cell, limbs, ends, colors, soil, bounds, options,
 
     # Frame the box from the ground to the run's tallest tree, so the framing
     # holds still from frame to frame.
-    box = np.array([[x, y, z] for x in plot for y in (0.0, top) for z in plot])
+    box = np.array([[x, y, z] for x in plot for y in (base, top) for z in plot])
     screen, _ = project(box)
     lo, hi = screen.min(axis=0), screen.max(axis=0)
     middle = 0.5 * (lo + hi)
@@ -299,12 +380,13 @@ def render_frame(task):
     time, plants, limbs, soil = read_frame(path)
     ends = limb_ends(limbs) if len(limbs) else np.zeros((0, 3), np.float32)
     colors, _ = limb_colors(options["color"], plants, limbs, energy_scale, age_scale, options["leaf_aspect"])
+    ground = limb_ground(plants, limbs)
     plot = options["plot"]
 
     view = options["view"]
     if view == "corner":
         fig, ax = plt.subplots(figsize=(options["size"] * options["aspect"], options["size"]), dpi=options["dpi"], facecolor="#dfe9f2")
-        draw_corner(ax, plot, options["soil_cell"], limbs, ends, colors, soil, bounds, options, turn)
+        draw_corner(ax, plot, options["soil_cell"], limbs, ends, ground, colors, soil, bounds, options, turn)
         fig.suptitle(f"Year {time:.1f}: {len(plants)} trees, {len(limbs)} limbs, colour: {options['color']}", fontsize=10)
         fig.subplots_adjust(left=0.0, right=1.0, bottom=0.0, top=0.95)
         fig.savefig(out)
@@ -319,9 +401,9 @@ def render_frame(task):
     widths = line_widths(limbs, axis_points / span * options["width_scale"])
     for ax, panel in zip(axes[0], panels):
         if panel == "side":
-            draw_side(ax, plot, limbs, ends, colors, widths, bounds, time, options["roots"], options["slab"])
+            draw_side(ax, plot, limbs, ends, ground, colors, widths, bounds, time, options["roots"], options["slab"], options["terrain"])
         else:
-            draw_top(ax, plot, options["soil_cell"], plants, limbs, ends, colors, widths, soil, time)
+            draw_top(ax, plot, options["soil_cell"], plants, limbs, ends, ground, colors, widths, soil, time, options["terrain"])
     fig.suptitle(f"{len(plants)} trees, {len(limbs)} limbs, colour: {options['color']}", fontsize=10)
     fig.tight_layout()
     fig.savefig(out)

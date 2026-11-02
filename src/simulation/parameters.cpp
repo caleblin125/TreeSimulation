@@ -1,4 +1,5 @@
 #include "simulation/simulation_constants.hpp"
+#include "simulation/terrain.hpp"
 
 #include <cstdio>
 #include <fstream>
@@ -46,6 +47,13 @@ const std::vector<Parameter>& Parameters()
     {"wind", "StormMeanGustMps", &StormMeanGustMps, "Gust speeds follow a Rayleigh distribution with this mean."},
     {"wind", "DesignWindSpeedMps", &DesignWindSpeedMps, "Stems sense the sway of an ordinary storm and the growth brain sees the resulting load, so they can thicken before the big one arrives."},
     {"wind", "StormLocalGustSpread", &StormLocalGustSpread, "Shelter and turbulence: each tree's gust is the storm's speed times a log-normal factor with this spread, so one storm does not fell a whole cohort."},
+    {"wood", "EnableSecondaryGrowth", &EnableSecondaryGrowth, "Secondary growth. Every woody limb's cambium lays on wood as the tree above it grows, paid before the growth the brain asks for, as fast as the tree can afford. A limb must carry HuberValue m2 of sapwood per m2 of green area it supplies (pipe model; wood never shrinks, so old pipes stay on as heartwood), be at least as thick as anything it bears, and an upright stem must stand a safety factor below Greenhill's buckling height 0.79 (E / rho g)^(1/3) D^(2/3)."},
+    {"wood", "HuberValue", &HuberValue, "Sapwood area per unit of green area. Real trees: 1e-4 to 1e-3."},
+    {"wood", "OpenBucklingSafetyFactor", &OpenBucklingSafetyFactor, "Buckling safety factor of a tree in full sun. McMahon (1973): about 4 for open-grown trees."},
+    {"wood", "ShadedBucklingSafetyFactor", &ShadedBucklingSafetyFactor, "Buckling safety factor of a fully shaded tree, which puts height before girth. The factor runs between the two with the sun on the tree's green parts."},
+    {"wood", "WoodElasticModulusPa", &WoodElasticModulusPa, "Green wood at the reference density; scales with each genome's density."},
+    {"wood", "GreenWoodMassPerDryMass", &GreenWoodMassPerDryMass, "Living wood holds about its dry weight in water."},
+    {"wood", "SapwoodDepthM", &SapwoodDepthM, "Only the outer sapwood is alive and respires; heartwood is dead. Real sapwood runs 1 to 10 cm deep."},
     {"mortality", "BackgroundMortalityPerYear", &BackgroundMortalityPerYear, "Disease, fire, grazing: every tree dies with this chance each year."},
     {"energy", "MaxLeafAssimilationMolCo2PerM2Second", &MaxLeafAssimilationMolCo2PerM2Second, ""},
     {"energy", "TissueRespirationFractionOfAssimilation", &TissueRespirationFractionOfAssimilation, "Dark respiration of any light-catching tissue, as a fraction of what it would fix in full sun. Shaded limbs and leaves therefore run at a loss."},
@@ -64,7 +72,7 @@ const std::vector<Parameter>& Parameters()
     {"xylem", "XylemMinimumStrengthMultiplier", &XylemMinimumStrengthMultiplier, ""},
     {"growth", "WoodConstructionEnergyJPerKg", &WoodConstructionEnergyJPerKg, ""},
     {"growth", "GrowthReserveFraction", &GrowthReserveFraction, ""},
-    {"growth", "MaxBranchElongationMetersPerYear", &MaxBranchElongationMetersPerYear, ""},
+    {"growth", "UpkeepReserveYears", &UpkeepReserveYears, "Growth has no fixed rate: a tree spends what it can afford, split between its limbs' length, width and thickness by their growth signals. It always keeps this many years of its current upkeep in reserve, besides GrowthReserveFraction of a seed."},
     {"growth", "AverageTreeSeedDryMassKg", &AverageTreeSeedDryMassKg, ""},
     {"growth", "SeedReserveEnergyDensityJPerKg", &SeedReserveEnergyDensityJPerKg, ""},
     {"growth", "BranchSpawnEnergyJ", &BranchSpawnEnergyJ, "Bud break plus the first few centimeters of shoot: roughly the construction cost of a seedling-sized twig, not of a mature branch. Bud overhead on top of the wood in the new shoot."},
@@ -73,12 +81,10 @@ const std::vector<Parameter>& Parameters()
     {"growth", "MaxBranchesPerSplit", &MaxBranchesPerSplit, ""},
     {"growth", "MinSplitGrowthM", &MinSplitGrowthM, "A limb may branch once it is this long, and again each time it has grown this much further."},
     {"growth", "MaxSegmentLengthM", &MaxSegmentLengthM, "No single limb grows longer than this. A segment that reaches it stops lengthening and opens a leader bud at its tip, so height and reach come from chains of segments and their side branches."},
-    {"growth", "DefaultCrossSectionGrowthMPerYear", &DefaultCrossSectionGrowthMPerYear, "Cross-section growth rate at full brain signal, for width and thickness alike."},
     {"growth", "MinLimbDimensionM", &MinLimbDimensionM, ""},
     {"growth", "LeafAspectRatio", &LeafAspectRatio, "Limbs at least this many times wider than thick count as leaves in the stats."},
     {"growth", "MinSheddingAgeYears", &MinSheddingAgeYears, "Unbranched shoots older than this are shed once their running energy balance turns negative."},
     {"growth", "LimbBalanceTimeConstantYears", &LimbBalanceTimeConstantYears, ""},
-    {"growth", "BaselineRootGrowthFraction", &BaselineRootGrowthFraction, ""},
     {"growth", "BranchSplitSignalThreshold", &BranchSplitSignalThreshold, ""},
     {"growth", "ReproductionSignalThreshold", &ReproductionSignalThreshold, ""},
     {"reproduction", "SeedProvisioningCostMultiplier", &SeedProvisioningCostMultiplier, ""},
@@ -138,6 +144,20 @@ const std::vector<Parameter>& Parameters()
     {"water", "MaxRainfall", &MaxRainfall, ""},
     {"pollination", "PollenRangeM", &PollenRangeM, "Pollination. Seeds are fathered by flowering neighbours within this range, weighted by their flowering tips and closeness. A tree with no partner in reach selfs, and selfed seed establishes less often."},
     {"pollination", "SelfedEstablishmentFactor", &SelfedEstablishmentFactor, ""},
+    {"terrain", "TerrainEnabled", &TerrainEnabled, "Off: flat ground at height 0. On: a fractal heightfield, the same on every rank, raises and tilts the ground and trees grow upright from wherever they root. Water collects in hollows (topographic wetness index ln(a / tan slope)), steep slopes carry thinner soil, wind speeds up over crests and slackens in hollows, slopes facing the noon sun run drier and higher ground has a shorter growing season."},
+    {"terrain", "TerrainSeed", &TerrainSeed, ""},
+    {"terrain", "TerrainReliefM", &TerrainReliefM, "Height difference between the lowest and highest point."},
+    {"terrain", "TerrainFeatureSizeM", &TerrainFeatureSizeM, "Size of the largest hills and valleys."},
+    {"terrain", "TerrainOctaves", &TerrainOctaves, ""},
+    {"terrain", "TerrainGridCellM", &TerrainGridCellM, "Grid spacing for the wetness and exposure maps."},
+    {"terrain", "TerrainWetnessEffect", &TerrainWetnessEffect, "Water supply changes by this share per standard deviation of wetness index."},
+    {"terrain", "TerrainSlopeSoilLoss", &TerrainSlopeSoilLoss, "Soil capacity lost per unit of slope (rise over run)."},
+    {"terrain", "TerrainWindSpeedup", &TerrainWindSpeedup, "Wind speed changes by this share per standard deviation of how far a spot stands above its surroundings (Jackson & Hunt 1975: up to 1.6x on low hills), within the bounds below."},
+    {"terrain", "TerrainMinWindFactor", &TerrainMinWindFactor, ""},
+    {"terrain", "TerrainMaxWindFactor", &TerrainMaxWindFactor, ""},
+    {"terrain", "TerrainExposureRadiusM", &TerrainExposureRadiusM, "Radius of the surroundings a spot's height is compared against."},
+    {"terrain", "TerrainSunSlopeDryness", &TerrainSunSlopeDryness, "Water demand rises by this share on a 45 degree slope facing the noon sun."},
+    {"terrain", "TerrainSeasonLossPer100M", &TerrainSeasonLossPer100M, "Share of the growing season lost per 100 m above the lowest point (about 4 days per 100 m in alpine larch)."},
     {"genetics", "GenomeMutationStdDev", &GenomeMutationStdDev, ""},
     {"genetics", "GenomeMinMultiplier", &GenomeMinMultiplier, ""},
     {"genetics", "GenomeMaxMultiplier", &GenomeMaxMultiplier, ""},
@@ -205,6 +225,7 @@ void ApplyDerivedParameters()
     SimulationMinZ = -0.5f * PlotSizeM;
     SimulationMaxZ = 0.5f * PlotSizeM;
     InitialEnergyJ = AverageTreeSeedDryMassKg * SeedReserveEnergyDensityJPerKg;
+    Terrain::Rebuild();
 }
 
 void LoadParameters(const std::string& path)
@@ -258,6 +279,8 @@ void LoadParameters(const std::string& path)
 
     if (PlotSizeM <= 0.0f || InitialFounderCount < 0 || SoilCellSizeM <= 0.0f || LightFieldCellSizeM <= 0.0f || DefaultTimeStepYears <= 0.0f)
         throw std::runtime_error(path + ": plot size, cell sizes and time step must be positive");
+    if (TerrainGridCellM <= 0.0f || TerrainFeatureSizeM <= 0.0f || TerrainReliefM < 0.0f || TerrainOctaves < 1 || SapwoodDepthM <= 0.0 || HuberValue < 0.0 || OpenBucklingSafetyFactor < 0.0 || ShadedBucklingSafetyFactor < 0.0)
+        throw std::runtime_error(path + ": terrain sizes and octaves, sapwood depth, Huber value and buckling safety factor must be positive");
     ApplyDerivedParameters();
 }
 

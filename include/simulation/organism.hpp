@@ -6,6 +6,7 @@
 #include <vector>
 #include <memory>
 #include <random>
+#include <unordered_map>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -41,9 +42,12 @@ namespace GrowthBrain
     // Founders' brain. The direct path gives the starting behaviour: grow up
     // and down, thicken and widen alike (so limbs start round) more as a limb
     // nears breaking, grow roots when supply or anchorage runs short, rarely
-    // branch, and start side buds a little thinner than the main line. Each hidden unit starts as a detector for
-    // one input being high but feeds no output, so it is silent until
-    // mutation connects it.
+    // branch, and start side buds a little thinner than the main line. Growth
+    // has no rate genes, so these signals alone set the proportions: a stem
+    // thickens about 1/200 as fast as it lengthens, 1/30 near breaking, and
+    // roots keep at least a sixth of full speed. Each hidden unit starts as a
+    // detector for one input being high but feeds no output, so it is silent
+    // until mutation connects it.
     constexpr std::array<double, WeightCount> DefaultWeights()
     {
         std::array<double, WeightCount> weights{};
@@ -55,17 +59,17 @@ namespace GrowthBrain
         constexpr std::size_t resource = 2;
         constexpr std::size_t torqueMargin = 6;
         direct(0, bias) = 3.0;
-        direct(1, bias) = 2.0;
-        direct(1, torqueMargin) = -4.0;
-        direct(2, bias) = 5.0;
+        direct(1, bias) = -3.5;
+        direct(1, torqueMargin) = -2.0;
+        direct(2, bias) = 8.3;
         direct(2, resource) = -4.0;
         direct(2, torqueMargin) = -6.0;
         direct(3, bias) = -2.5;
         direct(4, bias) = -1.5;
         direct(5, bias) = 1.2;
         direct(6, bias) = 3.0;
-        direct(7, bias) = 2.0;
-        direct(7, torqueMargin) = -4.0;
+        direct(7, bias) = -3.5;
+        direct(7, torqueMargin) = -2.0;
         direct(9, bias) = -1.0;
         for (std::size_t unit = 0; unit < HiddenCount; ++unit)
         {
@@ -89,8 +93,6 @@ class Organism{
         {
             // Id of the founding ancestor, inherited unchanged. Never mutates.
             unsigned int lineage = NoLineage;
-            double shootGrowthRate = SimulationConstants::MaxBranchElongationMetersPerYear;
-            double rootGrowthRate = SimulationConstants::MaxBranchElongationMetersPerYear;
             // Physical conversion, not a trait: it does not mutate.
             double rootSupportedLeafArea = SimulationConstants::RootSupportedLeafAreaPerRootArea;
             double groundExtractionMultiplier = 1.0;
@@ -98,11 +100,6 @@ class Organism{
             double bendingStrength = SimulationConstants::BranchBendingStrengthPa;
             double xylemConduitDiameterM = SimulationConstants::XylemReferenceConduitDiameterM;
             double xylemConductiveAreaFraction = SimulationConstants::XylemReferenceConductiveAreaFraction;
-            // Cross-section growth at full brain signal, metres per year. Width and
-            // thickness grow independently, so a limb can stay round, thicken into
-            // wood or spread into a thin blade.
-            double thicknessGrowthRate = SimulationConstants::DefaultCrossSectionGrowthMPerYear;
-            double widthGrowthRate = SimulationConstants::DefaultCrossSectionGrowthMPerYear;
             double branchSpawnEnergy = SimulationConstants::BranchSpawnEnergyJ;
             double reproductionOverhead = SimulationConstants::ReproductionEventOverheadJ;
             double maxAnnualReproductiveAllocation = SimulationConstants::MaxAnnualReproductiveAllocationFraction;
@@ -201,6 +198,13 @@ class Organism{
             double rainfall = 1.0;
             // Calm unless a storm is passing.
             Physics::Wind wind;
+            // Where the tree stands: water collected from upslope, extra
+            // demand on a sunward slope, how much the wind speeds up and how
+            // much of the growing season is left (see Terrain::Site).
+            double waterSupply = 1.0;
+            double waterDemand = 1.0;
+            double windExposure = 1.0;
+            double growingSeason = 1.0;
         };
 
         struct RootUptake
@@ -302,6 +306,14 @@ class Organism{
         // random (brain outputs are inherited whole), then mutated. The seed
         // keeps this tree's lineage. Without a pollen parent the seed is selfed.
         Genome MakeOffspringGenome(std::mt19937& randomGenerator, const Genome* pollenParent) const;
+
+        // Wood that is alive and respires: the sapwood, not the heartwood inside it.
+        static double LivingWoodVolume(const Limb& limb);
+        // Diameter each woody limb's cambium is working toward (see
+        // EnableSecondaryGrowth); limbs it leaves alone are absent. Also folds
+        // each upright stem's buckling load into its designUtilization.
+        // `sunExposure` (0 to 1) sets the buckling safety factor.
+        std::unordered_map<const Limb*, float> SecondaryGrowthTargets(const std::vector<std::shared_ptr<Limb>>& limbs, double sunExposure) const;
 
     private:
         struct LimbLight

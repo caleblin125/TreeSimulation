@@ -61,6 +61,10 @@ public:
     bool ExceedsStrength(double bendingStrength) const;
     double BendingUtilization(double bendingStrength) const;
     double Volume() const;
+    // Volume of the living outer shell, at most `depth` deep; the rest is heartwood.
+    double SapwoodVolume(double depth) const;
+    // Square-root of width * thickness: the diameter of a round limb of the same area.
+    float GetEquivalentDiameter() const;
     double SurfaceArea() const;
     double AboveGroundSurfaceArea() const;
     double UndergroundSurfaceArea() const;
@@ -80,6 +84,10 @@ public:
     float GetReach() const;
     float GetAspectRatio() const;
     const glm::vec3& GetRoot() const;
+    // Height of the ground where the tree stands. Trees treat the ground as
+    // level at their base, so below this is underground.
+    float GetGroundHeight() const;
+    void SetGroundHeight(float height);
     const glm::vec3& GetEnd() const;
     const glm::quat& GetOrientation() const;
     double GetCarriedWeight() const;
@@ -108,6 +116,7 @@ protected:
     glm::quat orientation; // Global orientation
     glm::quat rotation;    // Relative rotation
 
+    float groundHeight = 0;
     float length = 0;
     float width = 0;
     float thickness = 0;

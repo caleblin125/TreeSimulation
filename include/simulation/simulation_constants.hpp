@@ -55,6 +55,32 @@ namespace SimulationConstants
     // log-normal factor with this spread, so one storm does not fell a whole cohort.
     inline double StormLocalGustSpread = 0.3;
 
+    // Secondary growth. Every woody limb's cambium lays on wood as the tree
+    // above it grows. It is not optional, and it is paid before the growth
+    // the brain asks for. Three rules set how thick a limb must be:
+    //  - Pipe model (Shinozaki 1964): sapwood area at least HuberValue times
+    //    the green area the limb supplies. Wood never shrinks, so pipes left
+    //    by shed shoots stay on as heartwood.
+    //  - A limb is at least as thick as the thickest limb it bears.
+    //  - A near-upright stem stays clear of buckling under its own weight:
+    //    Greenhill's critical height 0.79 (E / rho g)^(1/3) D^(2/3) must exceed
+    //    the height above it by a safety factor. McMahon (1973) found trees
+    //    about 4 below it in the open; shaded trees put height before girth
+    //    and run nearer 2. The factor runs between the two with how much sun
+    //    the tree's green parts get.
+    inline bool EnableSecondaryGrowth = true;
+    // Sapwood area per unit of green area. Real trees: 1e-4 to 1e-3.
+    inline double HuberValue = 2.5e-4;
+    inline double OpenBucklingSafetyFactor = 4.0;
+    inline double ShadedBucklingSafetyFactor = 1.5;
+    // Green wood at the reference density; scales with each genome's density.
+    inline double WoodElasticModulusPa = 9.0e9;
+    // Living wood holds about its dry weight in water.
+    inline double GreenWoodMassPerDryMass = 2.0;
+    // Only the outer sapwood is alive and respires; heartwood is dead. Real
+    // sapwood runs 1 to 10 cm deep.
+    inline double SapwoodDepthM = 0.04;
+
     // Disease, fire, grazing: every tree dies with this chance each year.
     inline double BackgroundMortalityPerYear = 0.01;
 
@@ -86,7 +112,8 @@ namespace SimulationConstants
     // Growth/reproduction tuning, SI-ish but still simplified by the current tree model.
     inline double WoodConstructionEnergyJPerKg = 17.0e6;
     inline double GrowthReserveFraction = 0.35;
-    inline double MaxBranchElongationMetersPerYear = 0.6;
+    // Growth also leaves this many years of the tree's current upkeep in reserve.
+    inline double UpkeepReserveYears = 0.5;
     inline double AverageTreeSeedDryMassKg = 0.000488;
     inline double SeedReserveEnergyDensityJPerKg = 24.0e6;
     // Derived: AverageTreeSeedDryMassKg * SeedReserveEnergyDensityJPerKg.
@@ -108,8 +135,6 @@ namespace SimulationConstants
     // lengthening and opens a leader bud at its tip, so height and reach come
     // from chains of segments and their side branches.
     inline float MaxSegmentLengthM = 0.6f;
-    // Cross-section growth rate at full brain signal, for width and thickness alike.
-    inline double DefaultCrossSectionGrowthMPerYear = 0.02;
     inline float MinLimbDimensionM = 0.0002f;
     // Limbs at least this many times wider than thick count as leaves in the stats.
     inline float LeafAspectRatio = 4.0f;
@@ -117,7 +142,6 @@ namespace SimulationConstants
     // balance turns negative.
     inline float MinSheddingAgeYears = 1.0f;
     inline double LimbBalanceTimeConstantYears = 0.5;
-    inline double BaselineRootGrowthFraction = 0.15;
     inline double BranchSplitSignalThreshold = 0.15;
     inline double ReproductionSignalThreshold = 0.65;
     inline double SeedProvisioningCostMultiplier = 4.0;
@@ -237,6 +261,42 @@ namespace SimulationConstants
     // to a different design instead of creeping toward it.
     inline double LargeMutationChance = 0.02;
     inline double LargeMutationScale = 8.0;
+
+    // Terrain (off by default: flat ground at height 0). A fractal
+    // heightfield, the same on every rank, raises and tilts the ground; trees
+    // grow upright from wherever they root. Its effects follow field studies:
+    //  - Water collects in hollows and drains off ridges. Each spot's
+    //    topographic wetness index ln(a / tan slope), from the area a draining
+    //    through it, scales its water supply.
+    //  - Steep slopes carry thinner, poorer soil.
+    //  - Wind speeds up over crests (Jackson & Hunt 1975: up to 1.6x on low
+    //    hills) and slackens in hollows.
+    //  - Slopes facing the noon sun run warmer and drier.
+    //  - Higher ground has a shorter growing season (about 4 days per 100 m).
+    inline bool TerrainEnabled = false;
+    inline unsigned int TerrainSeed = 1;
+    // Height difference between the lowest and highest point.
+    inline float TerrainReliefM = 15.0f;
+    // Size of the largest hills and valleys.
+    inline float TerrainFeatureSizeM = 60.0f;
+    inline int TerrainOctaves = 4;
+    // Grid spacing for the wetness and exposure maps.
+    inline float TerrainGridCellM = 2.0f;
+    // Water supply changes by this share per standard deviation of wetness index.
+    inline double TerrainWetnessEffect = 0.25;
+    // Soil capacity lost per unit of slope (rise over run).
+    inline double TerrainSlopeSoilLoss = 0.6;
+    // Wind speed changes by this share per standard deviation of how far a
+    // spot stands above its surroundings, within the bounds below.
+    inline double TerrainWindSpeedup = 0.25;
+    inline double TerrainMinWindFactor = 0.6;
+    inline double TerrainMaxWindFactor = 1.6;
+    // Radius of the surroundings a spot's height is compared against.
+    inline float TerrainExposureRadiusM = 20.0f;
+    // Water demand rises by this share on a 45 degree slope facing the noon sun.
+    inline double TerrainSunSlopeDryness = 0.3;
+    // Share of the growing season lost per 100 m above the lowest point.
+    inline double TerrainSeasonLossPer100M = 0.022;
 
     // Profiling/debug output.
     inline bool EnableSimulationProfiling = true;
