@@ -12,8 +12,7 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include "simulation/organism.hpp"
-
-class World;
+#include "simulation/world.hpp"
 
 // Captures the world as plain data, for the viewer and for runs saved to disk
 // and rendered afterwards (`--output`, `--replay`, tools/render_run.py).
@@ -77,22 +76,35 @@ namespace Recording
     // Collective under MPI; the result is complete on rank 0 only.
     Frame Capture(World& world);
 
+    // Where a resumed run picks its recording back up.
+    struct ResumePoint
+    {
+        float timeYears = 0.0f;
+        std::size_t frameCount = 0;
+        std::size_t genomeCount = 0;
+    };
+
     // A run directory holds run.txt (the settings), metrics.csv (one row per
-    // metrics interval) and frames/frame_NNNNNN.bin (one full frame each).
-    // Only rank 0 writes.
+    // metrics interval), frames/frame_NNNNNN.bin (one full frame each) and
+    // genomes/genomes_NNNNNN.bin (every tree's genome). Only rank 0 writes.
     class Writer
     {
     public:
-        Writer(const std::filesystem::path& directory, const std::vector<std::pair<std::string, std::string>>& settings);
+        // With `resume`, appends to the run already in `directory`, first
+        // dropping anything it recorded after the resume point.
+        Writer(const std::filesystem::path& directory, const std::vector<std::pair<std::string, std::string>>& settings, const ResumePoint* resume = nullptr);
 
         void WriteMetrics(const Metrics& metrics, double wallSeconds);
         void WriteFrame(const Frame& frame);
+        void WriteGenomes(float timeYears, const std::vector<World::GenomeSample>& genomes);
         std::size_t FrameCount() const { return frameIndex; }
+        std::size_t GenomeCount() const { return genomeIndex; }
 
     private:
         std::filesystem::path directory;
         std::ofstream metricsFile;
         std::size_t frameIndex = 0;
+        std::size_t genomeIndex = 0;
     };
 
     // Reads one frame file; throws std::runtime_error on a malformed file.

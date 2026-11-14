@@ -2,6 +2,7 @@
 #include "simulation/terrain.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <iomanip>
@@ -70,6 +71,61 @@ struct SoilRecord
     float resource;
     float detritusKg;
 };
+
+// Genome file layout, little-endian: "TSGENOM1", then u32 version, tree
+// count, gene count and weight count, f32 time in years, the gene names
+// (each NUL-terminated), and one record per tree: u32 id, u32 lineage, f32
+// genes, f32 growth-brain weights (GrowthBrain's layout).
+constexpr char GenomeMagic[8] = {'T', 'S', 'G', 'E', 'N', 'O', 'M', '1'};
+constexpr std::uint32_t GenomeVersion = 1;
+
+struct Gene
+{
+    const char* name;
+    double (*value)(const Organism::Genome&);
+};
+
+#define TREESIM_GENE(field) Gene{#field, [](const Organism::Genome& genome) { return static_cast<double>(genome.field); }}
+const std::array Genes = {
+    TREESIM_GENE(rootSupportedLeafArea),
+    TREESIM_GENE(groundExtractionMultiplier),
+    TREESIM_GENE(woodDensity),
+    TREESIM_GENE(bendingStrength),
+    TREESIM_GENE(xylemConduitDiameterM),
+    TREESIM_GENE(xylemConductiveAreaFraction),
+    TREESIM_GENE(branchSpawnEnergy),
+    TREESIM_GENE(reproductionOverhead),
+    TREESIM_GENE(maxAnnualReproductiveAllocation),
+    TREESIM_GENE(minReproductionReserve),
+    TREESIM_GENE(seedInitialEnergy),
+    TREESIM_GENE(branchYawDegrees),
+    TREESIM_GENE(branchPitchDegrees),
+    TREESIM_GENE(childAttachment),
+    TREESIM_GENE(leaderUprightness),
+    TREESIM_GENE(initialShootLength),
+    TREESIM_GENE(initialRootLength),
+    TREESIM_GENE(initialWidth),
+    TREESIM_GENE(initialThickness),
+    TREESIM_GENE(minReproductionAgeYears),
+    TREESIM_GENE(minReproductionHeightM),
+};
+#undef TREESIM_GENE
+
+// Removes `directory/<prefix>NNNNNN.bin` files numbered `first` or later.
+void RemoveNumberedFrom(const std::filesystem::path& directory, const std::string& prefix, std::size_t first)
+{
+    if (!std::filesystem::is_directory(directory))
+        return;
+    for (const auto& entry : std::filesystem::directory_iterator(directory))
+    {
+        const std::string name = entry.path().filename().string();
+        if (name.rfind(prefix, 0) != 0)
+            continue;
+        const std::string digits = name.substr(prefix.size(), 6);
+        if (digits.size() == 6 && std::all_of(digits.begin(), digits.end(), [](char c) { return std::isdigit(static_cast<unsigned char>(c)); }) && std::stoul(digits) >= first)
+            std::filesystem::remove(entry.path());
+    }
+}
 
 static_assert(sizeof(FileHeader) == 32);
 static_assert(sizeof(PlantRecord) == 56);
@@ -184,10 +240,42 @@ Frame Capture(World& world)
     return frame;
 }
 
-Writer::Writer(const std::filesystem::path& directory, const std::vector<std::pair<std::string, std::string>>& settings)
+Writer::Writer(const std::filesystem::path& directory, const std::vector<std::pair<std::string, std::string>>& settings, const ResumePoint* resume)
     : directory(directory)
 {
     std::filesystem::create_directories(directory / "frames");
+    std::filesystem::create_directories(directory / "genomes");
+
+    if (resume)
+    {
+        frameIndex = resume->frameCount;
+        genomeIndex = resume->genomeCount;
+        RemoveNumberedFrom(directory / "frames", "frame_", frameIndex);
+        RemoveNumberedFrom(directory / "genomes", "genomes_", genomeIndex);
+
+        // Keep the header and the rows up to the resume point.
+        std::vector<std::string> rows;
+        {
+            std::ifstream existing(directory / "metrics.csv");
+            std::string line;
+            while (std::getline(existing, line))
+            {
+                if (rows.empty() || std::stof(line.substr(0, line.find(','))) <= resume->timeYears + 1e-3f)
+                    rows.push_back(line);
+            }
+        }
+        metricsFile.open(directory / "metrics.csv", std::ios::trunc);
+        if (!metricsFile)
+            throw std::runtime_error("cannot write " + (directory / "metrics.csv").string());
+        for (const std::string& row : rows)
+            metricsFile << row << '\n';
+        metricsFile.flush();
+
+        std::ofstream runFile(directory / "run.txt", std::ios::app);
+        for (const auto& [key, value] : settings)
+            runFile << "resumed_" << key << '=' << value << '\n';
+        return;
+    }
 
     std::ofstream runFile(directory / "run.txt");
     for (const auto& [key, value] : settings)
@@ -293,6 +381,44 @@ void Writer::WriteFrame(const Frame& frame)
     }
     std::filesystem::rename(partialPath, finalPath);
     ++frameIndex;
+}
+
+void Writer::WriteGenomes(float timeYears, const std::vector<World::GenomeSample>& genomes)
+{
+    std::ostringstream name;
+    name << "genomes_" << std::setw(6) << std::setfill('0') << genomeIndex << ".bin";
+    const std::filesystem::path finalPath = directory / "genomes" / name.str();
+    const std::filesystem::path partialPath = finalPath.string() + ".part";
+    {
+        std::ofstream file(partialPath, std::ios::binary);
+        if (!file)
+            throw std::runtime_error("cannot write " + partialPath.string());
+        const std::uint32_t counts[4] = {
+            GenomeVersion,
+            static_cast<std::uint32_t>(genomes.size()),
+            static_cast<std::uint32_t>(Genes.size()),
+            static_cast<std::uint32_t>(Organism::GrowthBrainWeightCount)
+        };
+        file.write(GenomeMagic, sizeof(GenomeMagic));
+        file.write(reinterpret_cast<const char*>(counts), sizeof(counts));
+        file.write(reinterpret_cast<const char*>(&timeYears), sizeof(timeYears));
+        for (const Gene& gene : Genes)
+            file.write(gene.name, static_cast<std::streamsize>(std::strlen(gene.name) + 1));
+
+        std::vector<float> values(Genes.size() + Organism::GrowthBrainWeightCount);
+        for (const World::GenomeSample& sample : genomes)
+        {
+            const std::uint32_t ids[2] = {sample.id, sample.genome.lineage};
+            file.write(reinterpret_cast<const char*>(ids), sizeof(ids));
+            for (std::size_t i = 0; i < Genes.size(); ++i)
+                values[i] = static_cast<float>(Genes[i].value(sample.genome));
+            for (std::size_t i = 0; i < Organism::GrowthBrainWeightCount; ++i)
+                values[Genes.size() + i] = static_cast<float>(sample.genome.growthBrainWeights[i]);
+            file.write(reinterpret_cast<const char*>(values.data()), static_cast<std::streamsize>(values.size() * sizeof(float)));
+        }
+    }
+    std::filesystem::rename(partialPath, finalPath);
+    ++genomeIndex;
 }
 
 Frame ReadFrame(const std::filesystem::path& path)

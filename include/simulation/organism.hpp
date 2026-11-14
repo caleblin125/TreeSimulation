@@ -3,6 +3,8 @@
 #include <array>
 #include <cstddef>
 #include <functional>
+#include <istream>
+#include <ostream>
 #include <vector>
 #include <memory>
 #include <random>
@@ -314,6 +316,10 @@ class Organism{
         // each upright stem's buckling load into its designUtilization.
         // `sunExposure` (0 to 1) sets the buckling safety factor.
         std::unordered_map<const Limb*, float> SecondaryGrowthTargets(const std::vector<std::shared_ptr<Limb>>& limbs, double sunExposure) const;
+
+        // The whole tree, limbs included, for checkpoints.
+        void Save(std::ostream& out) const;
+        static std::unique_ptr<Organism> Load(std::istream& in);
 
     private:
         struct LimbLight

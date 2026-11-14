@@ -1,4 +1,5 @@
 #include "simulation/world.hpp"
+#include "simulation/checkpoint.hpp"
 #include "simulation/distributed.hpp"
 #include "simulation/quadtree.hpp"
 #include "simulation/simulation_constants.hpp"
@@ -11,6 +12,8 @@
 #include <iomanip>
 #include <limits>
 #include <map>
+#include <sstream>
+#include <stdexcept>
 
 namespace
 {
@@ -691,6 +694,21 @@ std::vector<World::SoilSample> World::GetSoilSamples() const
     return ret;
 }
 
+std::vector<World::GenomeSample> World::GetGenomes() const
+{
+    std::vector<GenomeSample> ret;
+    ret.reserve(organisms.size());
+    for (const auto& organism : organisms)
+    {
+        if (organism)
+            ret.push_back({organism->GetId(), organism->GetGenome()});
+    }
+    if (distributed)
+        ret = Distributed::GatherToRoot(ret);
+    std::sort(ret.begin(), ret.end(), [](const GenomeSample& a, const GenomeSample& b) { return a.id < b.id; });
+    return ret;
+}
+
 std::vector<Organism::TraitSample> World::GetTraitSamples() const
 {
     std::vector<Organism::TraitSample> ret;
@@ -1126,4 +1144,116 @@ void World::PrintProfilingSummary(
             << (relative ? diversity.deviation[trait] / std::abs(diversity.mean[trait]) : diversity.deviation[trait]);
     }
     std::cout << std::endl;
+}
+
+namespace
+{
+    constexpr char CheckpointMagic[8] = {'T', 'S', 'C', 'H', 'K', 'P', 'T', '1'};
+
+    // Written first, so a checkpoint from another build or rank count is
+    // refused before anything is read raw.
+    struct CheckpointHeader
+    {
+        char magic[8];
+        std::uint32_t version;
+        std::uint32_t genomeSize;
+        std::uint32_t statsSize;
+        std::uint32_t weightCount;
+        std::int32_t rank;
+        std::int32_t rankCount;
+    };
+
+    // std::pair is not trivially copyable, so map entries are saved as these.
+    template <typename T>
+    struct KeyedEntry
+    {
+        long long key;
+        T value;
+    };
+
+    template <typename Map>
+    std::vector<KeyedEntry<typename Map::mapped_type>> ToEntries(const Map& map)
+    {
+        std::vector<KeyedEntry<typename Map::mapped_type>> entries;
+        entries.reserve(map.size());
+        for (const auto& [key, value] : map)
+            entries.push_back({key, value});
+        return entries;
+    }
+
+    CheckpointHeader MakeCheckpointHeader(int rank, int rankCount)
+    {
+        CheckpointHeader header{};
+        std::copy(std::begin(CheckpointMagic), std::end(CheckpointMagic), header.magic);
+        header.version = Checkpoint::FormatVersion;
+        header.genomeSize = sizeof(Organism::Genome);
+        header.statsSize = sizeof(Organism::Stats);
+        header.weightCount = Organism::GrowthBrainWeightCount;
+        header.rank = rank;
+        header.rankCount = rankCount;
+        return header;
+    }
+}
+
+void World::SaveCheckpoint(std::ostream& out) const
+{
+    Checkpoint::Write(out, MakeCheckpointHeader(rank, rankCount));
+    Checkpoint::Write(out, rainfall);
+    Checkpoint::Write(out, rainfallYear);
+    Checkpoint::Write(out, ids);
+    Checkpoint::Write(out, timeYears);
+    Checkpoint::Write(out, nextProfilingPrint);
+    Checkpoint::Write(out, interval);
+    std::ostringstream generator;
+    generator << randomGenerator;
+    Checkpoint::WriteString(out, generator.str());
+
+    Checkpoint::WriteVector(out, propagules);
+    Checkpoint::WriteVector(out, outboundPropagules);
+    Checkpoint::WriteVector(out, outboundOrganisms);
+    Checkpoint::WriteVector(out, outboundDepletions);
+    Checkpoint::WriteVector(out, ToEntries(soilCells));
+    Checkpoint::WriteVector(out, ToEntries(remoteSoil));
+
+    Checkpoint::Write<std::uint64_t>(out, organisms.size());
+    for (const auto& organism : organisms)
+        organism->Save(out);
+}
+
+void World::LoadCheckpoint(std::istream& in)
+{
+    const CheckpointHeader header = Checkpoint::Read<CheckpointHeader>(in);
+    const CheckpointHeader expected = MakeCheckpointHeader(rank, rankCount);
+    if (!std::equal(std::begin(header.magic), std::end(header.magic), std::begin(CheckpointMagic)))
+        throw std::runtime_error("not a TreeSim checkpoint");
+    if (header.version != expected.version || header.genomeSize != expected.genomeSize || header.statsSize != expected.statsSize || header.weightCount != expected.weightCount)
+        throw std::runtime_error("checkpoint was written by a different build");
+    if (header.rank != rank || header.rankCount != rankCount)
+        throw std::runtime_error("checkpoint was written for rank " + std::to_string(header.rank) + " of " + std::to_string(header.rankCount) + ", not " + std::to_string(rank) + " of " + std::to_string(rankCount));
+
+    rainfall = Checkpoint::Read<double>(in);
+    rainfallYear = Checkpoint::Read<int>(in);
+    ids = Checkpoint::Read<unsigned int>(in);
+    timeYears = Checkpoint::Read<float>(in);
+    nextProfilingPrint = Checkpoint::Read<float>(in);
+    interval = Checkpoint::Read<ProfileInterval>(in);
+    std::istringstream generator(Checkpoint::ReadString(in));
+    generator >> randomGenerator;
+
+    propagules = Checkpoint::ReadVector<Propagule>(in);
+    outboundPropagules = Checkpoint::ReadVector<Propagule>(in);
+    outboundOrganisms = Checkpoint::ReadVector<OrganismSeed>(in);
+    outboundDepletions = Checkpoint::ReadVector<SoilDepletion>(in);
+    soilCells.clear();
+    for (const auto& entry : Checkpoint::ReadVector<KeyedEntry<SoilCell>>(in))
+        soilCells[entry.key] = entry.value;
+    remoteSoil.clear();
+    for (const auto& entry : Checkpoint::ReadVector<KeyedEntry<double>>(in))
+        remoteSoil[entry.key] = entry.value;
+
+    organisms.clear();
+    const auto count = Checkpoint::Read<std::uint64_t>(in);
+    organisms.reserve(count);
+    for (std::uint64_t i = 0; i < count; ++i)
+        organisms.push_back(Organism::Load(in));
 }

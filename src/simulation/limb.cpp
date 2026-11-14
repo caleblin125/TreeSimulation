@@ -1,4 +1,5 @@
 #include "simulation/limb.hpp"
+#include "simulation/checkpoint.hpp"
 #include "simulation/geometry.hpp"
 #include "simulation/physics.hpp"
 #include "simulation/simulation_constants.hpp"
@@ -378,4 +379,77 @@ const glm::vec3& Limb::GetOwnDrag() const
 bool Limb::HasChildren() const
 {
     return !children.empty();
+}
+
+namespace
+{
+    // Everything a limb holds except its links, in checkpoint order.
+    struct LimbState
+    {
+        glm::vec3 root;
+        glm::vec3 end;
+        glm::quat orientation;
+        glm::quat rotation;
+        glm::vec3 ownDrag;
+        glm::vec3 carriedForce;
+        glm::vec3 carriedTorque;
+        float attachment;
+        float groundHeight;
+        float length;
+        float width;
+        float thickness;
+        float ageYears;
+        float lengthAtLastSplit;
+        float branchClass;
+        double groundExtraction;
+        double ownWeight;
+        double carriedWeight;
+        double energyBalance;
+        double designUtilization;
+        std::uint32_t childCount;
+        bool hasLeader;
+    };
+}
+
+void Limb::Save(std::ostream& out) const
+{
+    Checkpoint::Write(out, LimbState{
+        root, end, orientation, rotation, ownDrag, carriedForce, carriedTorque,
+        attachment, groundHeight, length, width, thickness, ageYears, lengthAtLastSplit, branchClass,
+        groundExtraction, ownWeight, carriedWeight, energyBalance, designUtilization,
+        static_cast<std::uint32_t>(children.size()), hasLeader});
+    for (const auto& child : children)
+        child->Save(out);
+}
+
+std::shared_ptr<Limb> Limb::Load(std::istream& in, const std::shared_ptr<Limb>& parent)
+{
+    const LimbState state = Checkpoint::Read<LimbState>(in);
+    auto limb = std::make_shared<Limb>(state.root, state.orientation);
+    limb->parent = parent;
+    limb->root = state.root;
+    limb->end = state.end;
+    limb->orientation = state.orientation;
+    limb->rotation = state.rotation;
+    limb->ownDrag = state.ownDrag;
+    limb->carriedForce = state.carriedForce;
+    limb->carriedTorque = state.carriedTorque;
+    limb->attachment = state.attachment;
+    limb->groundHeight = state.groundHeight;
+    limb->length = state.length;
+    limb->width = state.width;
+    limb->thickness = state.thickness;
+    limb->ageYears = state.ageYears;
+    limb->lengthAtLastSplit = state.lengthAtLastSplit;
+    limb->branchClass = state.branchClass;
+    limb->groundExtraction = state.groundExtraction;
+    limb->ownWeight = state.ownWeight;
+    limb->carriedWeight = state.carriedWeight;
+    limb->energyBalance = state.energyBalance;
+    limb->designUtilization = state.designUtilization;
+    limb->hasLeader = state.hasLeader;
+    limb->children.reserve(state.childCount);
+    for (std::uint32_t i = 0; i < state.childCount; ++i)
+        limb->children.push_back(Load(in, limb));
+    return limb;
 }

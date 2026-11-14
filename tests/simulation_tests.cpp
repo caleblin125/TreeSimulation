@@ -1512,6 +1512,64 @@ void TestParameterFiles()
     std::filesystem::remove_all(directory);
 }
 
+void TestCheckpointResumesExactly()
+{
+    // Two worlds from the same seed: one runs straight on, the other is
+    // saved partway and continued from the checkpoint in a fresh world.
+    const auto populate = [](World& world)
+    {
+        for (int i = 0; i < 6; ++i)
+            world.MakeOrganism(glm::vec3(-6.0f + 2.4f * static_cast<float>(i), 0.0f, 1.5f * static_cast<float>(i % 3)), glm::identity<glm::quat>());
+    };
+    World straight(17);
+    World saved(17);
+    populate(straight);
+    populate(saved);
+    for (int step = 0; step < 24; ++step)
+    {
+        straight.Simulate(SimulationConstants::DefaultTimeStepYears);
+        saved.Simulate(SimulationConstants::DefaultTimeStepYears);
+    }
+
+    std::stringstream checkpoint;
+    saved.SaveCheckpoint(checkpoint);
+    World resumed(99);
+    resumed.LoadCheckpoint(checkpoint);
+    ExpectNear(resumed.GetTimeYears(), straight.GetTimeYears(), 0.0, "checkpoint restores the clock");
+
+    for (int step = 0; step < 24; ++step)
+    {
+        straight.Simulate(SimulationConstants::DefaultTimeStepYears);
+        resumed.Simulate(SimulationConstants::DefaultTimeStepYears);
+    }
+    const auto a = straight.GetRenderSnapshots();
+    const auto b = resumed.GetRenderSnapshots();
+    bool same = a.size() == b.size() && straight.GetPropaguleCount() == resumed.GetPropaguleCount();
+    for (std::size_t i = 0; same && i < a.size(); ++i)
+    {
+        same = a[i].id == b[i].id && a[i].energy == b[i].energy && a[i].limbs.size() == b[i].limbs.size();
+        for (std::size_t j = 0; same && j < a[i].limbs.size(); ++j)
+            same = a[i].limbs[j].root == b[i].limbs[j].root && a[i].limbs[j].width == b[i].limbs[j].width && a[i].limbs[j].length == b[i].limbs[j].length;
+    }
+    Expect(!a.empty() && same, "a world resumed from a checkpoint carries on exactly as the original");
+
+    const auto genomes = straight.GetGenomes();
+    Expect(genomes.size() == a.size() && std::is_sorted(genomes.begin(), genomes.end(), [](const auto& x, const auto& y) { return x.id < y.id; }), "genomes come back one per tree in id order");
+
+    std::stringstream garbage("not a checkpoint at all, just some text that is long enough to read a header");
+    bool refused = false;
+    try
+    {
+        World other(1);
+        other.LoadCheckpoint(garbage);
+    }
+    catch (const std::runtime_error&)
+    {
+        refused = true;
+    }
+    Expect(refused, "a file that is not a checkpoint is refused");
+}
+
 int main()
 {
     TestGeometry();
@@ -1566,6 +1624,7 @@ int main()
     TestSecondaryGrowthKeepsStemsStout();
     TestTerrainShapesSites();
     TestParameterFiles();
+    TestCheckpointResumesExactly();
 
     if (failures > 0)
     {

@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <istream>
+#include <ostream>
 #include <memory>
 
 #include <random>
@@ -61,9 +63,21 @@ public:
     std::vector<Organism::RenderSnapshot> GetRenderSnapshots();
     std::vector<SoilSample> GetSoilSamples() const;
     std::vector<Organism::TraitSample> GetTraitSamples() const;
+    struct GenomeSample
+    {
+        unsigned int id = 0;
+        Organism::Genome genome;
+    };
+    // Every living tree's genome, in id order.
+    std::vector<GenomeSample> GetGenomes() const;
     static DiversitySummary SummarizeDiversity(const std::vector<Organism::TraitSample>& samples);
     // Resource level an undisturbed soil cell settles at.
     static double SoilCapacityAt(glm::vec3 position);
+
+    // This rank's share of the world. A checkpoint loads only into the same
+    // build, run on the same number of ranks; LoadCheckpoint throws otherwise.
+    void SaveCheckpoint(std::ostream& out) const;
+    void LoadCheckpoint(std::istream& in);
 
 private:
     struct Propagule

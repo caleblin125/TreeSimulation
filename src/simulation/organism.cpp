@@ -1,4 +1,5 @@
 #include "simulation/organism.hpp"
+#include "simulation/checkpoint.hpp"
 #include "simulation/geometry.hpp"
 #include "simulation/physics.hpp"
 #include "simulation/simulation_constants.hpp"
@@ -1303,4 +1304,46 @@ double Organism::EffectiveBendingStrength() const
         strengthMultiplier,
         SimulationConstants::XylemMinimumStrengthMultiplier,
         1.0);
+}
+
+namespace
+{
+    struct OrganismState
+    {
+        Organism::Genome genome;
+        Organism::Stats lastStats;
+        double energy;
+        double reproductiveEnergyBudget;
+        double anchorageMargin;
+        float ageYears;
+        unsigned int id;
+        bool alive;
+        bool hasCore;
+        bool hasRootSystem;
+    };
+}
+
+void Organism::Save(std::ostream& out) const
+{
+    Checkpoint::Write(out, OrganismState{genome, lastStats, energy, reproductiveEnergyBudget, anchorageMargin, ageYears, id, alive, core != nullptr, rootSystem != nullptr});
+    Checkpoint::WriteVector(out, fruitingSites);
+    if (core)
+        core->Save(out);
+    if (rootSystem)
+        rootSystem->Save(out);
+}
+
+std::unique_ptr<Organism> Organism::Load(std::istream& in)
+{
+    const OrganismState state = Checkpoint::Read<OrganismState>(in);
+    auto organism = std::make_unique<Organism>(state.id, glm::vec3(0.0f), glm::identity<glm::quat>(), state.genome, state.energy);
+    organism->lastStats = state.lastStats;
+    organism->reproductiveEnergyBudget = state.reproductiveEnergyBudget;
+    organism->anchorageMargin = state.anchorageMargin;
+    organism->ageYears = state.ageYears;
+    organism->alive = state.alive;
+    organism->fruitingSites = Checkpoint::ReadVector<glm::vec3>(in);
+    organism->core = state.hasCore ? Limb::Load(in) : nullptr;
+    organism->rootSystem = state.hasRootSystem ? Limb::Load(in) : nullptr;
+    return organism;
 }

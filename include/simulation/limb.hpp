@@ -4,6 +4,8 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <functional>
+#include <istream>
+#include <ostream>
 #include <vector>
 #include <memory>
 
@@ -94,6 +96,10 @@ public:
     const glm::vec3& GetCarriedTorque() const;
     const glm::vec3& GetOwnDrag() const;
     bool HasChildren() const;
+
+    // This limb and everything it bears, for checkpoints.
+    void Save(std::ostream& out) const;
+    static std::shared_ptr<Limb> Load(std::istream& in, const std::shared_ptr<Limb>& parent = nullptr);
 
     float ageYears = 0.0f;
     // Length when this limb last branched; it may branch again once it has grown past it.

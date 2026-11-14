@@ -117,18 +117,30 @@ To add a parameter, declare it `inline` in `simulation_constants.hpp` and add a 
 | `params.json` | Every parameter value the run used |
 | `metrics.csv` | One row per `--metrics-every` years (default 1): population, seeds waiting, limbs, mean and maximum height, mean energy, growth and reproduction, lineages, effective lineages and the spread of every trait |
 | `frames/frame_NNNNNN.bin` | One frame per `--frame-every` years (default 1; 0 writes metrics only): every limb of every tree, per-tree figures and the soil grid. The final state is always kept |
+| `genomes/genomes_NNNNNN.bin` | Every living tree's genome, one file per `--genomes-every` years (default 10; 0 writes none) and at the end: id, lineage, each gene and all growth-brain weights. Join with frames on the tree id |
+| `checkpoint/` | The whole simulation state, one file per rank plus `state.txt`, to continue the run from. Written when a headless run ends and every `--checkpoint-every` years (default 0: only at the end). Each replaces the last |
 | `terrain.bin` | With terrain on: the heightfield the run used, for renderers |
 
 ```
 ./build/TreeSim --headless 200 --seed 7 --output runs/seed7 --frame-every 2
 ```
 
-A frame of a mature forest is a few megabytes, so set `--frame-every` to suit the run's length. Metrics are flushed row by row, so a job killed at its time limit still leaves usable data up to that point.
+A frame of a mature forest is a few megabytes, so set `--frame-every` to suit the run's length. A genome file takes about 1.7 kB per tree. Metrics are flushed row by row, so a job killed at its time limit still leaves usable data up to that point.
+
+To continue a run past where it stopped, resume it from its checkpoint:
+
+```
+./build/TreeSim --resume runs/seed7 --headless 400
+```
+
+`--headless` is then the total number of years to reach. The run keeps recording into its own directory with its own `params.json`, seed and intervals, unless given others on the command line. Anything it recorded after the checkpoint is dropped first. A resumed run carries on exactly as if it had never stopped, but only on the same build and on as many MPI ranks as wrote the checkpoint.
 
 There are three ways to look at a recorded run:
 
 - **Replay in the viewer**: `./build/TreeSim --replay runs/seed7 --replay-fps 8` plays the frames with the usual camera and colour modes, and holds the last frame until the window is closed. Replayed trees carry only the figures the frame stores, so some fields in the selected-tree panel read zero.
 - **Render without OpenGL**: `python tools/render_run.py runs/seed7` writes `render/metrics.png`, one PNG per frame (side and top views) and an MP4 (with ffmpeg, or `pip install imageio-ffmpeg` where there is none, as on the cluster) or GIF (without). Options include `--color default|lineage|strain|energy|age`, `--view side|top|both|corner` (`corner` is a 3D perspective from above one corner; `--elevation`, `--azimuth`, `--fov` and `--orbit <degrees>` place and turn the camera), `--roots` to draw roots below ground, `--every N` to thin frames, and `--jobs N` to render in parallel. It needs numpy and matplotlib.
+- **Genomes**: `python tools/genomes.py runs/seed7` shows how far each gene and the growth brain have drifted from the founders, in the latest genome file or one picked with `--index`; `--csv out.csv` writes one row per tree. From Python, `read_genomes(path)` in the same file returns a genome file as numpy arrays.
+- **Phylogenomic tree**: `python tools/phylogeny.py runs/seed7` writes `render/phylogeny.png`. Runs don't record parents, so the tree is inferred from genetic distance (genes on a log scale and growth-brain weights, weighted equally), joined by average linkage (UPGMA), as real phylogenomics does. It shows a sample of trees (`--sample`, default 400) from the latest genome file or the one nearest `--year`, coloured by founder lineage. Beside the tree are each tree's height, limbs, flat-leaf share, age and some genes, plus side-view drawings of the tallest member of each main clade. Below it is every lineage's size over the whole run. It needs scipy as well.
 - **Compare runs**: `python tools/compare_runs.py <sweep dir or run dirs>` overlays the metrics of several runs (mean, 10–90% band and every run) in `compare.png` and writes each run's final values to `summary.csv`.
 
 ## Running on the cluster
@@ -151,7 +163,13 @@ sbatch cluster/run.sbatch
 YEARS=500 SEED=7 NAME=tall FRAME_EVERY=5 sbatch -N 2 -n 24 cluster/run.sbatch
 ```
 
-Each run writes to `runs/<NAME>_<jobid>`. When it finishes it queues `cluster/render.sbatch`, which renders that run on one 12-core node; set `RENDER=0` to skip this or `RENDER_ARGS` to pass options. To render a run again in another colouring:
+Each run writes to `runs/<NAME>_<jobid>`, with genomes every 10 years and a checkpoint every 50 by default (`GENOMES_EVERY`, `CHECKPOINT_EVERY`). To continue a run that hit its time limit, submit it again with `RESUME` and as many tasks as it had; `YEARS` is the total to reach:
+
+```
+RESUME=/haydean/caleb/treesim/runs/tall_1600 YEARS=1000 WALL_LIMIT=20000 sbatch -N 4 -n 48 --time=06:00:00 cluster/run.sbatch
+```
+
+When a run finishes it queues `cluster/render.sbatch`, which renders that run on one 12-core node; set `RENDER=0` to skip this or `RENDER_ARGS` to pass options. To render a run again in another colouring:
 
 ```
 RUN_DIR=/haydean/caleb/treesim/runs/tall_1600 RENDER_ARGS="--color lineage --roots" sbatch cluster/render.sbatch
@@ -230,7 +248,8 @@ Most tunable numbers live in `include/simulation/simulation_constants.hpp` and c
 | `src/simulation/parameters.cpp`, `params/` | JSON parameter loading, and parameter files |
 | `src/simulation/terrain.cpp` | Heightfield and the water, soil, wind and season maps derived from it |
 | `docs/realism.md` | Real-world constraints, the sources behind the wood and terrain rules, and known gaps |
-| `tools/` | Offline rendering and run comparison (Python) |
+| `include/simulation/checkpoint.hpp` | Binary helpers for checkpoints (each class saves and loads its own state) |
+| `tools/` | Offline rendering, genome reading and run comparison (Python) |
 | `cluster/` | Cluster build script and Slurm jobs |
 | `tests/simulation_tests.cpp` | Simulation tests |
 | `external/glad` | OpenGL loader |
