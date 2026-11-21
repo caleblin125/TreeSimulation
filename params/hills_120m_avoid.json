@@ -1,0 +1,31 @@
+// The 120 m hills forest with supply-limited soil, fine roots, leaf turnover
+// and seedling crowding (as hills_120m_soil.json), plus self-avoidance: a
+// shoot does not grow, bud or open a leader into a 10 cm cell its own crown
+// already fills. In 20 m tests this cut self-overlap from 25% to 15% of
+// crown cells and gave taller trees with thicker trunks.
+// Everything not listed keeps its default.
+{
+  "plot": {
+    "PlotSizeM": 120,
+    "InitialFounderCount": 2160
+  },
+  "terrain": {
+    "TerrainEnabled": true,
+    "TerrainSeed": 7,
+    "TerrainReliefM": 25,
+    "TerrainFeatureSizeM": 80
+  },
+  "soil": {
+    "SoilUptakePerRootAreaIndexYear": 0.02
+  },
+  "roots": {
+    "FineRootAreaPerRootLengthM": 0.1
+  },
+  "growth": {
+    "LeafTurnoverPerYear": 0.5,
+    "SelfAvoidanceCellM": 0.1
+  },
+  "seedling": {
+    "SeedlingRootCrowdingIndex": 0.5
+  }
+}

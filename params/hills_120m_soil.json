@@ -1,0 +1,29 @@
+// The 120 m forest on rolling hills (as hills_120m.json) with soil that
+// limits uptake by its supply instead of a fixed drain per root, fine roots
+// along every root, leaves that are replaced and fall as litter, and seeds
+// that fail where established roots crowd the ground.
+// Everything not listed keeps its default.
+{
+  "plot": {
+    "PlotSizeM": 120,
+    "InitialFounderCount": 2160
+  },
+  "terrain": {
+    "TerrainEnabled": true,
+    "TerrainSeed": 7,
+    "TerrainReliefM": 25,
+    "TerrainFeatureSizeM": 80
+  },
+  "soil": {
+    "SoilUptakePerRootAreaIndexYear": 0.02
+  },
+  "roots": {
+    "FineRootAreaPerRootLengthM": 0.1
+  },
+  "growth": {
+    "LeafTurnoverPerYear": 0.5
+  },
+  "seedling": {
+    "SeedlingRootCrowdingIndex": 0.5
+  }
+}

@@ -70,7 +70,9 @@ public:
     double SurfaceArea() const;
     double AboveGroundSurfaceArea() const;
     double UndergroundSurfaceArea() const;
+    // Absorbing surface: the root's own, plus the fine roots it carries.
     double GroundExtractionArea() const;
+    double FineRootArea() const;
     // Shadow area of the above-ground part toward `direction`.
     double ProjectedArea(const glm::vec3& direction) const;
     double NutrientPathLength() const;
@@ -96,6 +98,10 @@ public:
     const glm::vec3& GetCarriedTorque() const;
     const glm::vec3& GetOwnDrag() const;
     bool HasChildren() const;
+    // This limb, its parent, its children or a sibling.
+    bool IsFamily(const Limb& other) const;
+    // Share of its light-catching area that is green, after bark.
+    double GreenFraction() const;
 
     // This limb and everything it bears, for checkpoints.
     void Save(std::ostream& out) const;

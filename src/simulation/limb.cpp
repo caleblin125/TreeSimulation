@@ -212,9 +212,15 @@ double Limb::UndergroundSurfaceArea() const
     return SurfaceArea() * BelowGroundFraction(root, end, groundHeight);
 }
 
+double Limb::FineRootArea() const
+{
+    return SimulationConstants::FineRootAreaPerRootLengthM * static_cast<double>(length) *
+        BelowGroundFraction(root, end, groundHeight) * groundExtraction;
+}
+
 double Limb::GroundExtractionArea() const
 {
-    return UndergroundSurfaceArea() * groundExtraction;
+    return UndergroundSurfaceArea() * groundExtraction + FineRootArea();
 }
 
 double Limb::ProjectedArea(const glm::vec3& direction) const
@@ -452,4 +458,23 @@ std::shared_ptr<Limb> Limb::Load(std::istream& in, const std::shared_ptr<Limb>& 
     for (std::uint32_t i = 0; i < state.childCount; ++i)
         limb->children.push_back(Load(in, limb));
     return limb;
+}
+
+bool Limb::IsFamily(const Limb& other) const
+{
+    if (&other == this)
+        return true;
+    const std::shared_ptr<Limb> mine = parent.lock();
+    const std::shared_ptr<Limb> theirs = other.parent.lock();
+    return mine.get() == &other || theirs.get() == this || (mine && mine == theirs);
+}
+
+double Limb::GreenFraction() const
+{
+    // Bark: thicker tissue is less green, and a stem's bark closes over with age.
+    const double narrow = static_cast<double>(std::min(width, thickness)) / SimulationConstants::GreenTissueThicknessM;
+    double green = 1.0 / (1.0 + narrow * narrow);
+    if (SimulationConstants::StemGreenLifetimeYears > 0.0 && GetAspectRatio() < SimulationConstants::LeafAspectRatio)
+        green *= std::exp(-static_cast<double>(ageYears) / SimulationConstants::StemGreenLifetimeYears);
+    return green;
 }

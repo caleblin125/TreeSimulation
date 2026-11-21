@@ -405,15 +405,21 @@ void World::SimulateSubstep(
         lightField.Build(std::move(casters), directions, SimulationConstants::LightFieldCellSizeM);
     }
 
+    // Local organisms fill organismSpatial first, in this order.
+    std::size_t nextSpatial = 0;
     for (auto &o : organisms)
     {
         if (!o)
             continue;
 
-        const auto spatialIt = std::find_if(organismSpatial.begin(), organismSpatial.end(), [&](const OrganismSpatial& candidate)
-        {
-            return candidate.organism == o.get();
-        });
+        auto spatialIt = nextSpatial < organismSpatial.size() && organismSpatial[nextSpatial].organism == o.get()
+            ? organismSpatial.begin() + static_cast<std::ptrdiff_t>(nextSpatial)
+            : std::find_if(organismSpatial.begin(), organismSpatial.end(), [&](const OrganismSpatial& candidate)
+            {
+                return candidate.organism == o.get();
+            });
+        if (spatialIt != organismSpatial.end())
+            nextSpatial = static_cast<std::size_t>(std::distance(organismSpatial.begin(), spatialIt)) + 1;
         Organism::Environment environment;
         environment.yearFraction = yearFraction;
         environment.rainfall = rainfall;
@@ -444,7 +450,10 @@ void World::SimulateSubstep(
             }
 
             environment.soilCompetitionPressure = competitionPressure;
-            environment.soilResourceFactor = 1.0 / (1.0 + competitionPressure * SimulationConstants::SoilCompetitionPressureScale);
+            // With supply-limited soil, neighbours compete through the shared stock instead.
+            environment.soilResourceFactor = SimulationConstants::SoilUptakePerRootAreaIndexYear > 0.0
+                ? 1.0
+                : 1.0 / (1.0 + competitionPressure * SimulationConstants::SoilCompetitionPressureScale);
             environment.soilResourceAt = [this](const glm::vec3& position)
             {
                 return GetSoilResourceAt(position);
@@ -455,7 +464,9 @@ void World::SimulateSubstep(
         bool alive = o->Simulate(dtYears, environment);
         const Organism::Stats& stats = o->GetLastStats();
         for (const Organism::RootUptake& uptake : o->GetRootUptake())
-            DepleteSoil(uptake.position, uptake.area * SimulationConstants::SoilDepletionPerRootAreaYear * dtYears);
+            DepleteSoil(uptake.position, SimulationConstants::SoilUptakePerRootAreaIndexYear > 0.0
+                ? uptake.area / (SimulationConstants::SoilCellSizeM * SimulationConstants::SoilCellSizeM) * SimulationConstants::SoilUptakePerRootAreaIndexYear * dtYears
+                : uptake.area * SimulationConstants::SoilDepletionPerRootAreaYear * dtYears);
         AddDeadPlantDetritus(o->GetRootPosition(), stats.litterKg);
         AccumulateStats(totals, stats);
         profileSamples++;
@@ -539,7 +550,23 @@ void World::SimulateSubstep(
             light += (1.0 - SimulationConstants::DiffuseLightFraction) * sunTrack[point].weight * transmission(position, point, SimulationConstants::ExternalLimbShadeTransmission);
         return std::max(light, SimulationConstants::MinUnderstoryLight);
     };
-    SimulatePropagules(dtYears, propagulesEstablished, propagulesFailed, groundLight);
+    // Absorbing root area per square metre of ground around a point, from the
+    // trees whose roots spread within SoilCompetitionRadiusM of it.
+    const auto rootCrowding = [&](glm::vec3 position)
+    {
+        const float radius = SimulationConstants::SoilCompetitionRadiusM;
+        double area = 0.0;
+        for (std::size_t index : organismTree.Query(PointBounds(position, radius)))
+        {
+            const OrganismSpatial& neighbor = organismSpatial[index];
+            const float distance = glm::length(glm::vec2(neighbor.root.x - position.x, neighbor.root.z - position.z));
+            area += neighbor.rootArea * std::clamp(1.0 - static_cast<double>(distance / radius), 0.0, 1.0);
+        }
+        // The cone weight covers a third of the disc's area.
+        return area / (glm::pi<double>() * radius * radius / 3.0);
+    };
+    SimulatePropagules(dtYears, propagulesEstablished, propagulesFailed, groundLight,
+        SimulationConstants::SeedlingRootCrowdingIndex > 0.0 ? std::function<double(glm::vec3)>(rootCrowding) : nullptr);
 }
 
 void World::UpdateRainfall()
@@ -829,7 +856,7 @@ void World::SpawnPropagules(unsigned int count, Organism& parent, const std::vec
     }
 }
 
-void World::SimulatePropagules(float dtYears, unsigned int& established, unsigned int& failed, const std::function<double(glm::vec3)>& groundLight)
+void World::SimulatePropagules(float dtYears, unsigned int& established, unsigned int& failed, const std::function<double(glm::vec3)>& groundLight, const std::function<double(glm::vec3)>& rootCrowding)
 {
     for (Propagule& propagule : propagules)
     {
@@ -857,7 +884,11 @@ void World::SimulatePropagules(float dtYears, unsigned int& established, unsigne
         const double soilFactor = GetSoilResourceAt(propagule.position);
         const double light = groundLight ? groundLight(propagule.position) : 1.0;
         const double inbreeding = propagule.selfed ? SimulationConstants::SelfedEstablishmentFactor : 1.0;
-        if (establishmentChance(randomGenerator) < inbreeding * Organism::SeedEstablishmentProbability(propagule.reserveEnergy, soilFactor, light))
+        // Established roots take the water and nutrients a seedling would need first.
+        const double crowding = rootCrowding
+            ? std::exp(-rootCrowding(propagule.position) / SimulationConstants::SeedlingRootCrowdingIndex)
+            : 1.0;
+        if (establishmentChance(randomGenerator) < inbreeding * crowding * Organism::SeedEstablishmentProbability(propagule.reserveEnergy, soilFactor, light))
         {
             germinations.push_back({propagule.position, propagule.reserveEnergy, propagule.genome});
             established++;
@@ -940,7 +971,11 @@ void World::DepleteSoil(glm::vec3 position, double amount)
     }
 
     SoilCell& cell = soilCells.try_emplace(SoilKey(position), SoilCell{SoilCapacityAt(position), 0.0}).first->second;
-    cell.resource -= amount;
+    // Supply-limited soil: uptake is a share of what the cell holds.
+    if (SimulationConstants::SoilUptakePerRootAreaIndexYear > 0.0)
+        cell.resource *= std::exp(-amount);
+    else
+        cell.resource -= amount;
     cell.resource = std::clamp(cell.resource, 0.0, 1.0);
 }
 

@@ -8,6 +8,63 @@
 #include <cmath>
 #include <limits>
 #include <iostream>
+#include <unordered_map>
+
+namespace
+{
+// The space a tree's own shoots fill, in cubic cells, so a shoot can tell
+// whether it is about to grow into its own crown.
+class SelfSpace
+{
+public:
+    explicit SelfSpace(float cell) : cell(cell) {}
+
+    void Add(const Limb& limb)
+    {
+        const glm::vec3 root = limb.GetRoot();
+        const glm::vec3 end = limb.GetEnd();
+        const int steps = std::max(1, static_cast<int>(std::ceil(glm::length(end - root) / (0.5f * cell))));
+        std::uint64_t last = 0;
+        for (int i = 0; i <= steps; ++i)
+        {
+            const std::uint64_t key = Key(glm::mix(root, end, static_cast<float>(i) / static_cast<float>(steps)));
+            if (i > 0 && key == last)
+                continue;
+            last = key;
+            std::vector<const Limb*>& here = cells[key];
+            if (here.empty() || here.back() != &limb)
+                here.push_back(&limb);
+        }
+    }
+
+    // Whether `point` lies in a cell held by a limb outside `limb`'s family.
+    bool Blocked(const Limb& limb, const glm::vec3& point) const
+    {
+        const auto found = cells.find(Key(point));
+        if (found == cells.end())
+            return false;
+        for (const Limb* other : found->second)
+        {
+            if (!limb.IsFamily(*other))
+                return true;
+        }
+        return false;
+    }
+
+private:
+    std::uint64_t Key(const glm::vec3& point) const
+    {
+        const auto axis = [&](float value)
+        {
+            return static_cast<std::uint64_t>(static_cast<std::int64_t>(std::floor(value / cell)) + (1 << 20)) & 0x1fffffULL;
+        };
+        return axis(point.x) | (axis(point.y) << 21) | (axis(point.z) << 42);
+    }
+
+    float cell;
+    std::unordered_map<std::uint64_t, std::vector<const Limb*>> cells;
+};
+}
 
 Organism::Organism(unsigned int id, glm::vec3 root, glm::quat orientation)
     : Organism(id, root, orientation, Genome{})
@@ -99,6 +156,8 @@ bool Organism::Simulate(float dtYears, const Environment& environment)
     // Each root draws on the soil where it sits, so spreading roots reach ground
     // the trunk's own cell cannot offer.
     double rootSurfaceArea = 0.0;
+    double fineRootArea = 0.0;
+    double leafMassKg = 0.0;
     double effectiveRootArea = 0.0;
     double biomassKg = 0.0;
     double maxNutrientPathLength = 0.0;
@@ -107,6 +166,9 @@ bool Organism::Simulate(float dtYears, const Environment& environment)
         const double extractionArea = limb->GroundExtractionArea();
         const double limbMassKg = limb->Volume() * genome.woodDensity;
         rootSurfaceArea += extractionArea;
+        fineRootArea += limb->FineRootArea();
+        if (limb->CanPhotosynthesize() && limb->GetAspectRatio() >= SimulationConstants::LeafAspectRatio)
+            leafMassKg += limbMassKg;
         if (extractionArea > 0.0)
         {
             const double localSoil = environment.soilResourceAt
@@ -221,9 +283,22 @@ bool Organism::Simulate(float dtYears, const Environment& environment)
         lastStats.respirationEnergy += respirationEnergy;
     }
 
-    const double rootMaintenanceEnergy = rootSurfaceArea * SimulationConstants::RootUptakeMaintenanceJPerM2Year * dtYears;
+    // Fine roots are paid for by being rebuilt (below), not by this upkeep.
+    const double rootMaintenanceEnergy = std::max(0.0, rootSurfaceArea - fineRootArea) * SimulationConstants::RootUptakeMaintenanceJPerM2Year * dtYears;
     energy -= rootMaintenanceEnergy;
     lastStats.respirationEnergy += rootMaintenanceEnergy;
+
+    // Leaves and fine roots wear out and are rebuilt; what they replace falls
+    // as litter, which returns its nutrients to the soil.
+    const double replacedKg = (leafMassKg * SimulationConstants::LeafTurnoverPerYear +
+        fineRootArea / SimulationConstants::FineRootSpecificAreaM2PerKg * SimulationConstants::FineRootTurnoverPerYear) * dtYears;
+    if (replacedKg > 0.0)
+    {
+        const double turnoverEnergy = replacedKg * SimulationConstants::WoodConstructionEnergyJPerKg;
+        energy -= turnoverEnergy;
+        lastStats.respirationEnergy += turnoverEnergy;
+        lastStats.litterKg += replacedKg;
+    }
 
     const double reserveDecayEnergy = std::max(0.0, energy) * SimulationConstants::EnergyReserveTurnoverFractionPerYear * dtYears;
     energy -= reserveDecayEnergy;
@@ -294,6 +369,22 @@ bool Organism::Simulate(float dtYears, const Environment& environment)
             lastStats.splitSignals++;
     }
 
+    // Shoots don't grow into space their own crown already fills.
+    const bool avoidSelf = SimulationConstants::SelfAvoidanceCellM > 0.0f;
+    SelfSpace selfSpace(std::max(SimulationConstants::SelfAvoidanceCellM, 1.0e-3f));
+    if (avoidSelf)
+    {
+        for (const auto& limb : limbs)
+        {
+            if (limb->CanPhotosynthesize())
+                selfSpace.Add(*limb);
+        }
+    }
+    const auto tipBlocked = [&](const Limb& limb, const glm::vec3& heading)
+    {
+        return avoidSelf && selfSpace.Blocked(limb, limb.GetEnd() + heading * (0.5f * SimulationConstants::SelfAvoidanceCellM));
+    };
+
     // At most one shoot split and one root split per step. A limb branches once
     // it is long enough and again each time it has grown that much further, so
     // a growing shoot can carry several whorls. Roots branch by the same rule,
@@ -329,17 +420,28 @@ bool Organism::Simulate(float dtYears, const Environment& environment)
         const glm::quat qPitch = glm::angleAxis(glm::radians(pitch), glm::vec3(1.0f, 0.0f, 0.0f));
 
         const float yawStep = 360.0f / static_cast<float>(branchCount);
+        unsigned int spawned = 0;
         for (unsigned int branchIndex = 0; branchIndex < branchCount; ++branchIndex)
         {
             const float yaw = genome.branchYawDegrees + yawStep * static_cast<float>(branchIndex);
             const glm::quat qYaw = glm::angleAxis(glm::radians(yaw), glm::vec3(0.0f, 1.0f, 0.0f));
             parent->Spawn(attachment, qYaw * qPitch, SimulationConstants::BudLengthM, budWidth, budThickness);
-            parent->children.back()->branchClass = static_cast<float>(branchParent->brain.childClass);
+            Limb& bud = *parent->children.back();
+            // A shoot bud facing into its own crown stays dormant.
+            if (!splitRoots && tipBlocked(bud, bud.GetOrientation() * glm::vec3(0.0f, 1.0f, 0.0f)))
+            {
+                parent->children.pop_back();
+                continue;
+            }
+            bud.branchClass = static_cast<float>(branchParent->brain.childClass);
+            if (avoidSelf && !splitRoots)
+                selfSpace.Add(bud);
+            spawned++;
         }
         parent->lengthAtLastSplit = parent->GetLength();
 
-        energy -= branchCost;
-        lastStats.branchesSpawned += branchCount;
+        energy -= newLimbCost(splitRoots) * static_cast<double>(spawned);
+        lastStats.branchesSpawned += spawned;
         lastStats.branchAttachment = attachment;
     }
 
@@ -360,11 +462,15 @@ bool Organism::Simulate(float dtYears, const Environment& environment)
         glm::quat rotation = glm::identity<glm::quat>();
         const glm::vec3 heading = limb->GetOrientation() * up;
         const glm::vec3 target = root ? heading : glm::normalize(glm::mix(heading, up, genome.leaderUprightness));
+        if (!root && tipBlocked(*limb, target))
+            continue;
         if (glm::dot(heading, target) < 0.99999f)
             rotation = glm::inverse(limb->GetOrientation()) * glm::quat(heading, target) * limb->GetOrientation();
         // A leader carries on its parent's line, so it keeps its class.
         limb->Spawn(1.0f, rotation, SimulationConstants::BudLengthM, root ? genome.initialThickness : genome.initialWidth, genome.initialThickness);
         limb->children.back()->branchClass = limb->branchClass;
+        if (avoidSelf && !root)
+            selfSpace.Add(*limb->children.back());
         limb->hasLeader = true;
         energy -= cost;
         lastStats.branchesSpawned++;
@@ -432,7 +538,8 @@ bool Organism::Simulate(float dtYears, const Environment& environment)
     {
         Limb& limb = *decision.limb;
         const bool atFullLength = limb.GetLength() >= SimulationConstants::MaxSegmentLengthM - 1.0e-6f;
-        const double lengthSignal = atFullLength ? 0.0 : (limb.CanPhotosynthesize() ? decision.brain.elongation : decision.brain.rootGrowth);
+        const bool blocked = limb.CanPhotosynthesize() && tipBlocked(limb, limb.GetOrientation() * glm::vec3(0.0f, 1.0f, 0.0f));
+        const double lengthSignal = atFullLength || blocked ? 0.0 : (limb.CanPhotosynthesize() ? decision.brain.elongation : decision.brain.rootGrowth);
         signals.push_back({&limb, lengthSignal, decision.brain.widening, decision.brain.thickening});
         // Area each axis grows over: the cross-section for length, the side
         // faces for width and thickness.
@@ -958,9 +1065,8 @@ std::vector<Organism::LimbLight> Organism::CalculateSunlight(const std::vector<s
         potential += skyArea;
         received += skyArea * SkyView(limb, limbs, environment);
 
-        // Bark: thicker tissue is less green, and catches light it cannot use.
-        const double narrow = static_cast<double>(std::min(limb->GetWidth(), limb->GetThickness())) / SimulationConstants::GreenTissueThicknessM;
-        const double green = 1.0 / (1.0 + narrow * narrow);
+        // Bark catches light it cannot use.
+        const double green = limb->GreenFraction();
         ret.push_back({limb, potential <= 0.0 ? 0.0 : received / potential, potential * green});
     }
     return ret;
@@ -1197,9 +1303,8 @@ std::unordered_map<const Limb*, float> Organism::SecondaryGrowthTargets(const st
         Limb& limb = **it;
         Subtree& subtree = subtrees[&limb];
         // One-sided green area: the face a limb shows, less what bark covers.
-        const double narrow = static_cast<double>(std::min(limb.GetWidth(), limb.GetThickness())) / SimulationConstants::GreenTissueThicknessM;
         const double green = limb.AboveGroundSurfaceArea() / std::max(1.0e-9, limb.SurfaceArea()) *
-            static_cast<double>(limb.GetLength()) * static_cast<double>(std::max(limb.GetWidth(), limb.GetThickness())) / (1.0 + narrow * narrow);
+            static_cast<double>(limb.GetLength()) * static_cast<double>(std::max(limb.GetWidth(), limb.GetThickness())) * limb.GreenFraction();
         subtree.greenArea += green;
         subtree.absorbingArea += limb.GroundExtractionArea();
         subtree.top = std::max(subtree.top, std::max(limb.GetRoot().y, limb.GetEnd().y));

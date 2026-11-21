@@ -65,8 +65,12 @@ def sample_trees(lineage, count, rng):
     each where it has them) and the rest drawn in proportion to size."""
     if len(lineage) <= count:
         return np.arange(len(lineage))
-    chosen = []
     lineages, sizes = np.unique(lineage, return_counts=True)
+    # Early in a run nearly every founder still has its own lineage; keeping
+    # one of each would swamp the sample, so draw plainly instead.
+    if len(lineages) > count // 2:
+        return np.sort(rng.choice(len(lineage), count, replace=False))
+    chosen = []
     floor = max(1, min(3, count // max(1, len(lineages))))
     for value in lineages:
         members = np.flatnonzero(lineage == value)
@@ -78,28 +82,48 @@ def sample_trees(lineage, count, rng):
     return np.sort(np.array(chosen))
 
 
-def feature_matrix(dump, rows):
-    """Genes (log scale where positive, scaled by spread) and brain weights
-    (scaled by pooled spread), weighted so each block counts equally."""
+def fit_space(dump, rows):
+    """The genetic space the tree is drawn in, fitted to the sampled trees:
+    genes on a log scale where positive, each scaled by its spread, and brain
+    weights scaled by their pooled spread, weighted so each block counts
+    equally. Returns a function mapping (dump, rows) of any genome file into
+    that same space, so trees from other years can be placed in it."""
     genes = []
-    for values in dump["genes"].values():
+    for name, values in dump["genes"].items():
         column = values[rows].astype(np.float64)
-        if np.all(column > 0):
+        use_log = bool(np.all(column > 0))
+        if use_log:
             column = np.log(column)
         spread = column.std()
         if spread > 1e-12:
-            genes.append((column - column.mean()) / spread)
+            genes.append((name, use_log, column.mean(), spread))
     weights = dump["weights"][rows].astype(np.float64)
-    weights = weights - weights.mean(axis=0)
-    pooled = weights.std()
-    blocks = []
-    if genes:
-        blocks.append(np.stack(genes, axis=1) / np.sqrt(len(genes)))
-    if pooled > 1e-12:
-        blocks.append(weights / pooled / np.sqrt(weights.shape[1]))
-    if not blocks:
-        return np.zeros((len(rows), 1))
-    return np.concatenate(blocks, axis=1)
+    weight_mean = weights.mean(axis=0)
+    pooled = (weights - weight_mean).std()
+
+    def transform(other, other_rows):
+        blocks = []
+        if genes:
+            columns = []
+            for name, use_log, mean, spread in genes:
+                column = other["genes"][name][other_rows].astype(np.float64)
+                if use_log:
+                    column = np.log(np.maximum(column, 1e-30))
+                columns.append((column - mean) / spread)
+            blocks.append(np.stack(columns, axis=1) / np.sqrt(len(genes)))
+        if pooled > 1e-12:
+            w = other["weights"][other_rows].astype(np.float64)
+            blocks.append((w - weight_mean) / pooled / np.sqrt(w.shape[1]))
+        if not blocks:
+            return np.zeros((len(other_rows), 1))
+        return np.concatenate(blocks, axis=1)
+
+    return transform
+
+
+def feature_matrix(dump, rows):
+    """Sampled trees in the genetic space fitted to them (see fit_space)."""
+    return fit_space(dump, rows)(dump, rows)
 
 
 def frame_time(path):

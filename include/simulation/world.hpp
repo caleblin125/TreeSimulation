@@ -143,7 +143,7 @@ private:
     // Each year's rainfall is drawn once, at the turn of the year.
     void UpdateRainfall();
     // groundLight gives the share of sunlight reaching a spot on the ground; null means open sky.
-    void SimulatePropagules(float dt, unsigned int& established, unsigned int& failed, const std::function<double(glm::vec3)>& groundLight);
+    void SimulatePropagules(float dt, unsigned int& established, unsigned int& failed, const std::function<double(glm::vec3)>& groundLight, const std::function<double(glm::vec3)>& rootCrowding = nullptr);
     Physics::Wind DrawStorm(float dtYears);
     void SimulateSubstep(
         float dtYears,

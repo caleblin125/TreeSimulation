@@ -138,6 +138,9 @@ namespace SimulationConstants
     inline float MinLimbDimensionM = 0.0002f;
     // Limbs at least this many times wider than thick count as leaves in the stats.
     inline float LeafAspectRatio = 4.0f;
+    // Share of its mass a leaf (a limb at least LeafAspectRatio times wider
+    // than thick) replaces each year; the old tissue falls as litter.
+    inline double LeafTurnoverPerYear = 0.0;
     // Unbranched shoots older than this are shed once their running energy
     // balance turns negative.
     inline float MinSheddingAgeYears = 1.0f;
@@ -186,6 +189,11 @@ namespace SimulationConstants
     inline float SeedMaxGerminationYears = 1.0f;
 
     // Seedling/root geometry and below-ground resource uptake.
+    // Seeds fail where established roots already crowd the ground: the odds of
+    // establishing are multiplied by exp(-root area index / this), counting
+    // absorbing root area per m2 of ground within SoilCompetitionRadiusM.
+    // 0 turns crowding off.
+    inline double SeedlingRootCrowdingIndex = 0.0;
     inline float InitialShootLengthM = 0.08f;
     inline float InitialRootLengthM = 0.08f;
     inline float InitialLimbWidthM = 0.008f;
@@ -194,6 +202,13 @@ namespace SimulationConstants
     inline double RootSupportedLeafAreaPerRootArea = 1.0;
     // Absorbing root surface is living tissue and costs energy to keep.
     inline double RootUptakeMaintenanceJPerM2Year = 2.0e6;
+    // Fine roots: absorbing surface carried along every metre of underground
+    // root, far cheaper per square metre than woody root bark. They live about
+    // a year, so the tree rebuilds them and the dead ones feed the soil.
+    // 0 leaves only the woody roots' own surface absorbing.
+    inline double FineRootAreaPerRootLengthM = 0.0;
+    inline double FineRootSpecificAreaM2PerKg = 25.0;
+    inline double FineRootTurnoverPerYear = 1.0;
     // A tree uproots when shoot weight * height exceeds this factor times
     // root weight * root reach.
     inline double AnchorageFactor = 10.0;
@@ -204,6 +219,13 @@ namespace SimulationConstants
     inline double SoilCapacityAtPoorEdge = 0.5;
     inline double SoilRecoveryPerYear = 0.12;
     inline double SoilDepletionPerRootAreaYear = 0.35;
+    // Above 0, soil supply limits uptake: each square metre of absorbing root
+    // per square metre of ground draws this share of a cell's resource a year,
+    // so roots share a cell's supply and the stock settles where uptake
+    // matches recovery. Neighbours then compete only through that shared
+    // stock, and SoilDepletionPerRootAreaYear and the neighbour pressure are
+    // not used.
+    inline double SoilUptakePerRootAreaIndexYear = 0.0;
     inline double DeadBiomassDecompositionRatePerYear = 0.25;
     inline double SoilNutritionGainPerDetritusKg = 0.08;
     inline float SoilCompetitionRadiusM = 2.5f;
@@ -233,6 +255,14 @@ namespace SimulationConstants
     // capacity is 1 / (1 + (t / this)^2), t being its thinner cross-section,
     // so thin blades and twigs photosynthesise fully and trunks hardly at all.
     inline double GreenTissueThicknessM = 0.01;
+    // Bark forms on a stem within a year or two, after which it photosynthesises
+    // little. Above 0, a limb that is not a leaf keeps exp(-age / this) of its
+    // green capacity. 0 keeps stems green for life.
+    inline double StemGreenLifetimeYears = 0.0;
+    // Above 0, a shoot does not grow, branch or open a leader into space its own
+    // tree already fills: cells of this size holding any limb other than its
+    // parent, children or siblings. 0 lets shoots pass through each other.
+    inline float SelfAvoidanceCellM = 0.0f;
 
     // Water. Every square metre of sunlit leaf transpires, and broad blades
     // run hotter and lose more: demand per area is 1 + 0.5 * sqrt(width / this),
