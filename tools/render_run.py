@@ -74,7 +74,10 @@ DEFAULT_PLOT = (-10.0, 10.0)
 SOIL_CELL = 2.0
 LEAF_ASPECT = 4.0
 
-COLOR_MODES = ("default", "lineage", "strain", "energy", "age")
+COLOR_MODES = ("default", "genetic", "lineage", "strain", "energy", "age")
+# How far the "genetic" colour mode shifts colours by genome; the default mode
+# uses --genetic-tint (a slighter shift).
+GENETIC_MODE_TINT = 0.6
 VIEWS = ("side", "top", "both", "corner")
 
 
@@ -172,11 +175,33 @@ def lineage_colors(lineage):
     return np.stack([channel(5.0), channel(3.0), channel(1.0)], axis=1)
 
 
-def limb_colors(mode, plants, limbs, energy_scale, age_scale, leaf_aspect):
+_tint_tables = {}
+
+
+def tint_table(run):
+    """The run's genetic tints (tools/genetic_colors.py), loaded once per
+    process; None when the run has no genome dumps."""
+    key = str(run)
+    if key not in _tint_tables:
+        import genetic_colors
+        try:
+            table = genetic_colors.load_tints(run)
+            _tint_tables[key] = table if len(table[0]) else None
+        except (OSError, ValueError, KeyError) as error:
+            print(f"no genetic tints for {run}: {error}", file=sys.stderr)
+            _tint_tables[key] = None
+    return _tint_tables[key]
+
+
+def limb_colors(mode, plants, limbs, energy_scale, age_scale, leaf_aspect, run=None, tint_strength=0.0):
+    """Per-limb RGBA and whether each limb is below ground. With a run given,
+    the default and genetic modes shift each tree's colour slightly by its
+    genome (tint_strength, or GENETIC_MODE_TINT for the genetic mode)."""
     per_plant = np.repeat(np.arange(len(plants)), plants["limb_count"])
     narrow = np.maximum(1e-6, np.minimum(limbs["width"], limbs["thickness"]))
     leaf = np.maximum(limbs["width"], limbs["thickness"]) / narrow >= leaf_aspect
-    below = limbs["root"][:, 1] < -1e-4
+    # Underground means below the tree's own base (on hills the ground isn't at 0).
+    below = limbs["root"][:, 1] < limb_ground(plants, limbs) - 1e-4
 
     if mode == "lineage":
         rgb = lineage_colors(plants["lineage"])[per_plant]
@@ -192,6 +217,12 @@ def limb_colors(mode, plants, limbs, energy_scale, age_scale, leaf_aspect):
     else:
         rgb = np.tile([0.42, 0.30, 0.20], (len(limbs), 1))
         rgb[leaf] = [0.25, 0.62, 0.20]
+        strength = GENETIC_MODE_TINT if mode == "genetic" else tint_strength
+        table = tint_table(run) if run is not None and strength > 0 else None
+        if table is not None:
+            import genetic_colors
+            tints = genetic_colors.plant_tints(table, plants["id"])[per_plant]
+            rgb = genetic_colors.apply_tint(rgb, tints, strength)
         rgb[below] = [0.55, 0.42, 0.30]
 
     alpha = np.where(below, 0.45, 0.9)
@@ -203,7 +234,9 @@ def line_widths(limbs, points_per_metre, minimum=0.25):
     return np.clip(breadth * points_per_metre, minimum, 40.0)
 
 
-def draw_side(ax, plot, limbs, ends, ground, colors, widths, bounds, time, show_roots, slab, terrain):
+def draw_side(ax, plot, limbs, ends, ground, colors, widths, bounds, time, show_roots, slab, terrain, plot_z=None):
+    """plot_z: the z range in view when it differs from the x range (a region)."""
+    plot_z = plot if plot_z is None else plot_z
     ax.set_facecolor("#dfe9f2")
     lo, hi = bounds
     if terrain is None:
@@ -214,15 +247,15 @@ def draw_side(ax, plot, limbs, ends, ground, colors, widths, bounds, time, show_
         # so trees on the near slopes still show.
         xs = np.linspace(plot[0], plot[1], 400)
         if slab:
-            ax.fill_between(xs, lo, height_at(terrain, xs, 0.5 * (plot[0] + plot[1])), color="#cdbb9f", zorder=0)
+            ax.fill_between(xs, lo, height_at(terrain, xs, 0.5 * (plot_z[0] + plot_z[1])), color="#cdbb9f", zorder=0)
         else:
-            zs = np.linspace(plot[0], plot[1], 100)
+            zs = np.linspace(plot_z[0], plot_z[1], 100)
             heights = height_at(terrain, xs[None, :], zs[:, None])
             ax.fill_between(xs, lo, heights.min(axis=0), color="#cdbb9f", zorder=0)
             ax.fill_between(xs, heights.min(axis=0), heights.max(axis=0), color="#cdbb9f", alpha=0.35, linewidth=0, zorder=0)
     keep = np.ones(len(limbs), bool) if show_roots else limbs["root"][:, 1] >= ground - 1e-4
     if slab:
-        keep &= np.abs(limbs["root"][:, 2] - 0.5 * (plot[0] + plot[1])) <= 0.5 * slab
+        keep &= np.abs(limbs["root"][:, 2] - 0.5 * (plot_z[0] + plot_z[1])) <= 0.5 * slab
     # Far limbs first, so nearer ones (larger z) are drawn over them.
     order = np.argsort(limbs["root"][keep, 2])
     idx = np.flatnonzero(keep)[order]
@@ -274,8 +307,12 @@ def draw_top(ax, plot, soil_cell, plants, limbs, ends, ground, colors, widths, s
 def draw_corner(ax, plot, soil_cell, limbs, ends, ground, colors, soil, bounds, options, turn):
     """Perspective view from above one corner of the plot, drawn as projected
     line segments so it stays fast for large forests."""
-    span = plot[1] - plot[0]
+    # options["plot_z"] views a region whose z range differs from its x range
+    # (the interactive viewer's zoom); by default the plot is square.
+    plot_z = options.get("plot_z", plot)
+    span = max(plot[1] - plot[0], plot_z[1] - plot_z[0])
     centre = 0.5 * (plot[0] + plot[1])
+    centre_z = 0.5 * (plot_z[0] + plot_z[1])
     top = max(bounds[1], 1.0)
     fov = np.radians(options["fov"])
     elevation = np.radians(options["elevation"])
@@ -283,7 +320,12 @@ def draw_corner(ax, plot, soil_cell, limbs, ends, ground, colors, soil, bounds, 
     azimuth = np.radians(options["azimuth"] + options["orbit"] * turn)
     terrain = options["terrain"]
     base = 0.0 if terrain is None else float(terrain[3].min())
-    target = np.array([centre, base + 0.15 * (top - base), centre])
+    if terrain is not None and "plot_z" in options:
+        # A region: frame from its own lowest ground, not the whole terrain's.
+        xs = np.linspace(plot[0], plot[1], 32)
+        zs = np.linspace(plot_z[0], plot_z[1], 32)
+        base = float(height_at(terrain, xs[None, :], zs[:, None]).min())
+    target = np.array([centre, base + 0.15 * (top - base), centre_z])
     # Far enough back that the plot's diagonal fits the field of view.
     distance = options["distance"] * 0.75 * span * np.sqrt(2.0) / np.tan(0.5 * fov)
     direction = np.array([-np.sin(np.pi / 4 + azimuth) * np.cos(elevation), np.sin(elevation), np.cos(np.pi / 4 + azimuth) * np.cos(elevation)])
@@ -329,6 +371,9 @@ def draw_corner(ax, plot, soil_cell, limbs, ends, ground, colors, soil, bounds, 
         light = np.clip(normal @ np.array([-0.5, 0.8, -0.3]) / np.linalg.norm([-0.5, 0.8, -0.3]), 0, 1)
         shade = plt.get_cmap("YlGn")(0.15 + 0.6 * np.clip(resource, 0, 1))
         shade[:, :3] *= (0.55 + 0.45 * light)[:, None]
+    if "plot_z" in options:
+        inside = (x0 + cell > plot[0]) & (x0 < plot[1]) & (z0 + cell > plot_z[0]) & (z0 < plot_z[1])
+        x0, z0, shade = x0[inside], z0[inside], shade[inside]
     if len(x0):
         corners = np.stack([
             np.stack([x0, height_at(terrain, x0, z0), z0], -1),
@@ -355,7 +400,7 @@ def draw_corner(ax, plot, soil_cell, limbs, ends, ground, colors, soil, bounds, 
 
     # Frame the box from the ground to the run's tallest tree, so the framing
     # holds still from frame to frame.
-    box = np.array([[x, y, z] for x in plot for y in (base, top) for z in plot])
+    box = np.array([[x, y, z] for x in plot for y in (base, top) for z in plot_z])
     screen, _ = project(box)
     lo, hi = screen.min(axis=0), screen.max(axis=0)
     middle = 0.5 * (lo + hi)
@@ -379,7 +424,8 @@ def render_frame(task):
     path, out, options, bounds, energy_scale, age_scale, turn = task
     time, plants, limbs, soil = read_frame(path)
     ends = limb_ends(limbs) if len(limbs) else np.zeros((0, 3), np.float32)
-    colors, _ = limb_colors(options["color"], plants, limbs, energy_scale, age_scale, options["leaf_aspect"])
+    colors, _ = limb_colors(options["color"], plants, limbs, energy_scale, age_scale, options["leaf_aspect"],
+                            options.get("run"), options.get("genetic_tint", 0.0))
     ground = limb_ground(plants, limbs)
     plot = options["plot"]
 
@@ -519,6 +565,8 @@ def main():
     parser.add_argument("--distance", type=float, default=1.0, help="corner view: camera distance; larger flattens the perspective")
     parser.add_argument("--aspect", type=float, default=16 / 9, help="corner view: image width over height")
     parser.add_argument("--jobs", type=int, default=int(os.environ.get("SLURM_CPUS_PER_TASK", os.cpu_count() or 1)))
+    parser.add_argument("--genetic-tint", type=float, default=0.15,
+                        help="shift each tree's colour by up to this share by its genome (default mode; 0 = off)")
     parser.add_argument("--fps", type=float, default=8.0)
     parser.add_argument("--no-video", action="store_true", help="keep the PNGs only")
     parser.add_argument("--no-frames", action="store_true", help="plot metrics only")
@@ -549,7 +597,9 @@ def main():
         frame_dir.mkdir(exist_ok=True)
         options = {"view": args.view, "color": args.color, "size": args.size, "dpi": args.dpi, "width_scale": args.width_scale, "roots": args.roots, "slab": args.slab,
                    "elevation": args.elevation, "azimuth": args.azimuth, "orbit": args.orbit, "fov": args.fov, "distance": args.distance, "aspect": args.aspect,
-                   **read_run(args.run)}
+                   "run": args.run, "genetic_tint": args.genetic_tint, **read_run(args.run)}
+        if args.color in ("default", "genetic") and args.genetic_tint > 0:
+            tint_table(args.run)  # build the cache once, before the workers need it
         name = f"{args.view}_{args.color}"
         last = max(1, len(frames) - 1)
         tasks = [(path, frame_dir / f"{name}_{i:06d}.png", options, bounds, energy_scale, age_scale, i / last) for i, path in enumerate(frames)]
