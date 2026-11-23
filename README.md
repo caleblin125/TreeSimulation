@@ -317,6 +317,10 @@ Most tunable numbers live in `include/simulation/simulation_constants.hpp` and c
 | `tests/simulation_tests.cpp` | Simulation tests |
 | `external/glad` | OpenGL loader |
 
+## Acknowledgements
+
+Inspired by *The Surprising Map of Plants* (https://www.youtube.com/watch?v=ONVpFtiD-fo).
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
