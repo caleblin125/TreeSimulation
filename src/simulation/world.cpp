@@ -343,21 +343,33 @@ void World::SimulateSubstep(
         for (const OrganismSpatial& local : organismSpatial)
             localRoots.push_back({local.root, local.rootArea});
 
-        std::vector<std::size_t> limbsPerRank;
-        std::vector<std::size_t> rootsPerRank;
-        ghostLimbs = Distributed::AllGather(localLimbs, &limbsPerRank);
-        ghostRoots = Distributed::AllGather(localRoots, &rootsPerRank);
-
-        // Drop our own contribution from the gathered lists.
-        std::size_t limbOffset = 0;
-        std::size_t rootOffset = 0;
-        for (int r = 0; r < rank; ++r)
+        // A rank only keeps ghosts inside its own reach (worldBounds, below),
+        // so each limb and root is sent only to the ranks whose reach it
+        // touches, instead of every rank receiving the whole forest. The
+        // margin covers float differences between a limb and its ghost copy;
+        // the receiver applies the exact test, so the kept ghosts and their
+        // order are as if everything had been sent.
+        const std::vector<Spatial::Bounds2> reach = Distributed::AllGather(std::vector<Spatial::Bounds2>{worldBounds});
+        constexpr float margin = 0.01f;
+        std::vector<std::vector<GhostLimb>> limbsTo(reach.size());
+        std::vector<std::vector<GhostRoot>> rootsTo(reach.size());
+        for (std::size_t r = 0; r < reach.size(); ++r)
         {
-            limbOffset += limbsPerRank[r];
-            rootOffset += rootsPerRank[r];
+            if (static_cast<int>(r) == rank)
+                continue;
+            for (std::size_t i = 0; i < limbSpatial.size(); ++i)
+            {
+                if (Spatial::Intersects(Spatial::Expanded(limbSpatial[i].bounds, margin), reach[r]))
+                    limbsTo[r].push_back(localLimbs[i]);
+            }
+            for (std::size_t i = 0; i < organismSpatial.size(); ++i)
+            {
+                if (Spatial::Intersects(PointBounds(organismSpatial[i].root, 0.01f + margin), reach[r]))
+                    rootsTo[r].push_back(localRoots[i]);
+            }
         }
-        ghostLimbs.erase(ghostLimbs.begin() + limbOffset, ghostLimbs.begin() + limbOffset + limbsPerRank[rank]);
-        ghostRoots.erase(ghostRoots.begin() + rootOffset, ghostRoots.begin() + rootOffset + rootsPerRank[rank]);
+        ghostLimbs = Distributed::Exchange(limbsTo);
+        ghostRoots = Distributed::Exchange(rootsTo);
     }
 
     if (organismSpatial.empty())
@@ -369,7 +381,7 @@ void World::SimulateSubstep(
     constexpr std::size_t ghostOwner = std::numeric_limits<std::size_t>::max();
     for (const GhostLimb& ghost : ghostLimbs)
     {
-        const auto limb = std::make_shared<Limb>(ghost.root, ghost.orientation, ghost.length, ghost.width, ghost.thickness);
+        const auto limb = Limb::Make(ghost.root, ghost.orientation, ghost.length, ghost.width, ghost.thickness);
         limb->SetGroundHeight(ghost.groundHeight);
         const Spatial::Bounds2 bounds = LimbBounds2(limb);
         if (Spatial::Intersects(bounds, worldBounds))

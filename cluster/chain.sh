@@ -9,7 +9,8 @@
 # SNAPSHOT_EVERY_HOURS (6), FRAME_EVERY (2 years), GENOMES_EVERY (10 years),
 # CHECKPOINT_EVERY (10 years), RENDER_LAST (1: full render once the chain ends),
 # TREESIM_BUILD (binary to run; give the chain its own build so later edits
-# and rebuilds don't change it midway).
+# and rebuilds don't change it midway), TREESIM_SPILL_DIR (/var/tmp: local
+# disk where limbs spill once a node runs low on memory; "" turns it off).
 # Every job needs the same rank count, so NODES stays fixed for the chain.
 set -euo pipefail
 source "$(dirname "$0")/env.sh"
@@ -24,7 +25,8 @@ ranks=$(( NODES * 12 ))
 stamp=$(date +%Y%m%d_%H%M)
 RUN_DIR="$TREESIM_RESULTS/runs/${NAME}_${stamp}"
 common=(--parsable -p "$TREESIM_PARTITION" -N "$NODES" -n "$ranks" --time=02:00:00)
-env_common="ALL,TREESIM_BUILD=$TREESIM_BUILD,RUN_DIR=$RUN_DIR,YEARS=100000,WALL_LIMIT=6300,RENDER=0"
+TREESIM_SPILL_DIR="${TREESIM_SPILL_DIR-/var/tmp}"
+env_common="ALL,TREESIM_BUILD=$TREESIM_BUILD,TREESIM_SPILL_DIR=$TREESIM_SPILL_DIR,RUN_DIR=$RUN_DIR,YEARS=100000,WALL_LIMIT=6300,RENDER=0"
 
 previous=""
 for (( i = 1; i <= jobs; i++ )); do

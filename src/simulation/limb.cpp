@@ -64,7 +64,7 @@ Limb::Limb(std::weak_ptr<Limb> parent, float attachment, glm::quat rotation, flo
 }
 
 void Limb::Spawn(float attachment, glm::quat localRotation, float initialLength, float initialWidth, float initialThickness){
-    children.push_back(std::make_shared<Limb>(
+    children.push_back(Limb::Make(
         weak_from_this(),
         attachment,
         localRotation,
@@ -431,7 +431,7 @@ void Limb::Save(std::ostream& out) const
 std::shared_ptr<Limb> Limb::Load(std::istream& in, const std::shared_ptr<Limb>& parent)
 {
     const LimbState state = Checkpoint::Read<LimbState>(in);
-    auto limb = std::make_shared<Limb>(state.root, state.orientation);
+    auto limb = Limb::Make(state.root, state.orientation);
     limb->parent = parent;
     limb->root = state.root;
     limb->end = state.end;

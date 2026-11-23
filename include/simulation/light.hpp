@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -29,7 +30,8 @@ public:
     const glm::vec3& Direction(std::size_t index) const;
 
     // Calls visit(caster) for each limb that may block the ray from `point`
-    // toward light direction `index`, until visit returns false.
+    // toward light direction `index`, until visit returns false. The order is
+    // by reach toward the light, not by caster, so callers must not depend on it.
     template <typename Visit>
     void ForEachCandidate(std::size_t index, const glm::vec3& point, Visit&& visit) const
     {
@@ -43,13 +45,20 @@ public:
 
         const float along = glm::dot(point, layer.direction);
         const std::size_t cell = static_cast<std::size_t>(cellV) * static_cast<std::size_t>(layer.cellsU) + static_cast<std::size_t>(cellU);
-        for (std::uint32_t entry = layer.cellStart[cell]; entry < layer.cellStart[cell + 1]; ++entry)
+        // Each cell's entries are sorted by how far toward the light they
+        // reach, so the limbs lying wholly beyond the point (which can't shade
+        // it) are skipped with one binary search instead of one by one.
+        const std::uint32_t* end = layer.cellEntries.data() + layer.cellStart[cell + 1];
+        const std::uint32_t* entry = std::partition_point(layer.cellEntries.data() + layer.cellStart[cell], end, [&](std::uint32_t index)
         {
-            const Bound& bound = layer.bounds[layer.cellEntries[entry]];
-            // Only limbs lying toward the light can shade the point.
-            if (bound.maxAlong <= along || u < bound.minU || u > bound.maxU || v < bound.minV || v > bound.maxV)
+            return layer.bounds[index].maxAlong <= along;
+        });
+        for (; entry != end; ++entry)
+        {
+            const Bound& bound = layer.bounds[*entry];
+            if (u < bound.minU || u > bound.maxU || v < bound.minV || v > bound.maxV)
                 continue;
-            if (!visit(casters[layer.cellEntries[entry]]))
+            if (!visit(casters[*entry]))
                 return;
         }
     }

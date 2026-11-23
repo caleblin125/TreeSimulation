@@ -24,6 +24,9 @@ namespace Distributed
     unsigned long long Sum(unsigned long long value);
     std::vector<char> AllGatherBytes(const void* data, std::size_t byteCount, std::vector<std::size_t>* bytesPerRank);
     std::vector<char> GatherBytesToRoot(const void* data, std::size_t byteCount);
+    // Sends sendCounts[r] items of unitBytes each, laid out rank after rank in
+    // send, to rank r; returns what every rank sent here, in rank order.
+    std::vector<char> ExchangeBytes(const void* send, const std::vector<std::size_t>& sendCounts, std::size_t unitBytes);
 
     template <typename T>
     std::vector<T> FromBytes(const std::vector<char>& bytes)
@@ -46,6 +49,23 @@ namespace Distributed
                 count /= sizeof(T);
         }
         return items;
+    }
+
+    // toRank[r] goes to rank r (toRank needs one list per rank). Returns the
+    // lists every rank addressed to this one, concatenated in rank order.
+    // Unlike AllGather, each rank receives only what is meant for it.
+    template <typename T>
+    std::vector<T> Exchange(const std::vector<std::vector<T>>& toRank)
+    {
+        static_assert(std::is_trivially_copyable_v<T>, "only plain data can cross ranks");
+        std::vector<T> send;
+        std::vector<std::size_t> counts;
+        for (const std::vector<T>& items : toRank)
+        {
+            send.insert(send.end(), items.begin(), items.end());
+            counts.push_back(items.size());
+        }
+        return FromBytes<T>(ExchangeBytes(send.data(), counts, sizeof(T)));
     }
 
     // Concatenates every rank's items in rank order on the root; other ranks get nothing back.

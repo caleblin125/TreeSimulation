@@ -1,6 +1,8 @@
 #include "simulation/distributed.hpp"
 
 #include <chrono>
+#include <limits>
+#include <stdexcept>
 
 #ifdef TREESIM_USE_MPI
 #include <mpi.h>
@@ -125,6 +127,48 @@ std::vector<char> GatherBytesToRoot(const void* data, std::size_t byteCount)
     const char* bytes = static_cast<const char*>(data);
     return std::vector<char>(bytes, bytes + byteCount);
 }
+std::vector<char> ExchangeBytes(const void* send, const std::vector<std::size_t>& sendCounts, std::size_t unitBytes)
+{
+    if (!Active())
+    {
+        const char* bytes = static_cast<const char*>(send);
+        return std::vector<char>(bytes, bytes + (sendCounts.empty() ? 0 : sendCounts[0]) * unitBytes);
+    }
+    const int rankCount = RankCount();
+    // Counts are in whole items (a contiguous type of unitBytes), which keeps
+    // them inside MPI's int range far longer than byte counts would.
+    std::vector<int> sendItems(rankCount, 0);
+    std::vector<int> sendOffsets(rankCount, 0);
+    long long offset = 0;
+    for (int r = 0; r < rankCount; ++r)
+    {
+        const std::size_t count = r < static_cast<int>(sendCounts.size()) ? sendCounts[r] : 0;
+        if (count > static_cast<std::size_t>(std::numeric_limits<int>::max()) || offset > std::numeric_limits<int>::max())
+            throw std::runtime_error("Distributed::ExchangeBytes: too much data for one exchange");
+        sendItems[r] = static_cast<int>(count);
+        sendOffsets[r] = static_cast<int>(offset);
+        offset += static_cast<long long>(count);
+    }
+    std::vector<int> receiveItems(rankCount, 0);
+    MPI_Alltoall(sendItems.data(), 1, MPI_INT, receiveItems.data(), 1, MPI_INT, MPI_COMM_WORLD);
+    std::vector<int> receiveOffsets(rankCount, 0);
+    long long total = 0;
+    for (int r = 0; r < rankCount; ++r)
+    {
+        if (total > std::numeric_limits<int>::max())
+            throw std::runtime_error("Distributed::ExchangeBytes: too much data for one exchange");
+        receiveOffsets[r] = static_cast<int>(total);
+        total += receiveItems[r];
+    }
+    std::vector<char> received(static_cast<std::size_t>(total) * unitBytes);
+    MPI_Datatype unit;
+    MPI_Type_contiguous(static_cast<int>(unitBytes), MPI_BYTE, &unit);
+    MPI_Type_commit(&unit);
+    MPI_Alltoallv(send, sendItems.data(), sendOffsets.data(), unit,
+                  received.data(), receiveItems.data(), receiveOffsets.data(), unit, MPI_COMM_WORLD);
+    MPI_Type_free(&unit);
+    return received;
+}
 #else
 void Init(int&, char**&)
 {
@@ -171,6 +215,12 @@ std::vector<char> GatherBytesToRoot(const void* data, std::size_t byteCount)
 {
     const char* bytes = static_cast<const char*>(data);
     return std::vector<char>(bytes, bytes + byteCount);
+}
+
+std::vector<char> ExchangeBytes(const void* send, const std::vector<std::size_t>& sendCounts, std::size_t unitBytes)
+{
+    const char* bytes = static_cast<const char*>(send);
+    return std::vector<char>(bytes, bytes + (sendCounts.empty() ? 0 : sendCounts[0]) * unitBytes);
 }
 #endif
 

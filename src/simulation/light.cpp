@@ -88,6 +88,17 @@ void LightField::Build(std::vector<Caster> newCasters, const std::vector<glm::ve
                 for (int u = u0; u <= u1; ++u)
                     layer.cellEntries[counts[static_cast<std::size_t>(v) * layer.cellsU + u]++] = static_cast<std::uint32_t>(i);
         }
+        // Sort each cell by reach toward the light for ForEachCandidate's
+        // binary search (ties by caster, so the order is repeatable).
+        for (std::size_t cell = 0; cell < cellCount; ++cell)
+        {
+            std::sort(layer.cellEntries.begin() + layer.cellStart[cell], layer.cellEntries.begin() + layer.cellStart[cell + 1], [&](std::uint32_t a, std::uint32_t b)
+            {
+                const float reachA = layer.bounds[a].maxAlong;
+                const float reachB = layer.bounds[b].maxAlong;
+                return reachA < reachB || (reachA == reachB && a < b);
+            });
+        }
     }
 }
 

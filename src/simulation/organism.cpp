@@ -78,14 +78,14 @@ Organism::Organism(unsigned int id, glm::vec3 root, glm::quat orientation, Genom
 
 Organism::Organism(unsigned int id, glm::vec3 root, glm::quat orientation, Genome genome, double initialEnergy) : id(id),
                                                                              genome(genome),
-                                                                             core(std::make_shared<Limb>(
+                                                                             core(Limb::Make(
                                                                                  root,
                                                                                  orientation,
                                                                                  genome.initialShootLength,
                                                                                  genome.initialWidth,
                                                                                  genome.initialThickness,
                                                                                  genome.groundExtractionMultiplier)),
-                                                                             rootSystem(std::make_shared<Limb>(
+                                                                             rootSystem(Limb::Make(
                                                                                  root,
                                                                                  orientation * glm::angleAxis(glm::radians(180.0f), glm::vec3(1.0f, 0.0f, 0.0f)),
                                                                                  genome.initialRootLength,

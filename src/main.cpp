@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <exception>
@@ -24,6 +25,7 @@
 #include "simulation/distributed.hpp"
 #include "simulation/recording.hpp"
 #include "simulation/simulation_constants.hpp"
+#include "simulation/spill.hpp"
 #include "simulation/world.hpp"
 #ifdef TREESIM_WITH_VIEWER
 #include "renderer/renderer.hpp"
@@ -58,6 +60,11 @@ struct Options
     double wallLimitSeconds = 0.0;
     // JSON file overriding simulation parameters; empty keeps the defaults.
     std::string params;
+    // Directory on a local disk for limbs once memory runs low (Spill); empty
+    // keeps everything in memory. Defaults to $TREESIM_SPILL_DIR.
+    std::string spillDir = std::getenv("TREESIM_SPILL_DIR") ? std::getenv("TREESIM_SPILL_DIR") : "";
+    // Spill once the node has less than this much memory available.
+    double spillReserveMB = 2048.0;
     // Write the effective parameters here and exit.
     std::string writeParams;
 };
@@ -78,6 +85,10 @@ void PrintUsage()
         "  --resume <dir>           continue a recorded run from its checkpoint, on as many\n"
         "                           ranks as wrote it; --headless is the total years\n"
         "  --wall-limit <seconds>   end a headless run cleanly after this much wall time\n"
+        "  --spill-dir <dir>        move new limbs to a file here once the node runs low on\n"
+        "                           memory, instead of being killed (default $TREESIM_SPILL_DIR;\n"
+        "                           use a local disk, not a RAM-backed /tmp)\n"
+        "  --spill-reserve-mb <n>   available memory below which spilling starts (default 2048)\n"
         "  --replay <dir>           play a recorded run in the viewer\n"
         "  --replay-fps <n>         frames per second during replay (default 4)\n");
 }
@@ -120,6 +131,10 @@ Options ParseOptions(int argc, char** argv)
             options.replayFps = std::stof(value);
         else if (flag == "--wall-limit")
             options.wallLimitSeconds = std::stod(value);
+        else if (flag == "--spill-dir")
+            options.spillDir = value;
+        else if (flag == "--spill-reserve-mb")
+            options.spillReserveMB = std::stod(value);
         else if (flag == "--params")
             options.params = value;
         else if (flag == "--write-params")
@@ -264,6 +279,7 @@ int main(int argc, char** argv)
     Distributed::Init(argc, argv);
     const bool isRoot = Distributed::IsRoot();
     Options options = ParseOptions(argc, argv);
+    Spill::Configure(options.spillDir, static_cast<std::size_t>(options.spillReserveMB * 1024.0 * 1024.0));
     const bool headless = options.headlessYears > 0.0f;
 
     // A resumed run records into its own directory with its own parameters
@@ -621,6 +637,11 @@ int main(int argc, char** argv)
         const std::size_t trees = world.GetOrganismCount();
         if (isRoot)
             printf("Simulated %.1f years on %d rank(s) in %.1f s, %zu trees\n", world.GetTimeYears(), Distributed::RankCount(), Distributed::WallTimeSeconds() - startSeconds, trees);
+        const Spill::Usage spill = Spill::GetUsage();
+        const unsigned long long spilledBytes = Distributed::Sum(spill.liveBytes);
+        const unsigned long long spillFileBytes = Distributed::Sum(spill.fileBytes);
+        if (isRoot && Spill::Enabled())
+            printf("Spilled limbs: %.2f GB in files of %.2f GB, all ranks\n", spilledBytes / 1e9, spillFileBytes / 1e9);
         if (writer)
             printf("Wrote %zu frames to %s\n", writer->FrameCount(), options.output.c_str());
     }

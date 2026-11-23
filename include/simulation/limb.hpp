@@ -10,6 +10,7 @@
 #include <memory>
 
 #include "simulation/physics.hpp"
+#include "simulation/spill.hpp"
 
 // A limb is an elliptic cylinder along its local y axis. Width is the full
 // cross-section extent along local x and thickness along local z, so the
@@ -34,6 +35,14 @@ public:
 
     Limb(glm::vec3 root, glm::quat orientation, float initialLength = 0.0f, float initialWidth = 0.0f, float initialThickness = 0.0f, double groundExtraction = 1.0);
     Limb(std::weak_ptr<Limb> parent, float attachment, glm::quat rotation, float initialLength = 0.0f, float initialWidth = 0.0f, float initialThickness = 0.0f, double groundExtraction = 1.0);
+
+    // Makes a limb where Spill puts it: in memory, or in the spill file once
+    // memory runs low. Use this, not std::make_shared.
+    template <typename... Args>
+    static std::shared_ptr<Limb> Make(Args&&... args)
+    {
+        return std::allocate_shared<Limb>(Spill::Allocator<Limb>{}, std::forward<Args>(args)...);
+    }
     void Spawn(float attachment, glm::quat localRotation, float initialLength, float initialWidth, float initialThickness);
 
     LimbData GetData()

@@ -3,3 +3,4 @@ build/**
 imgui.ini
 build_*/**
 renders/
+__pycache__/
