@@ -4,6 +4,7 @@
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-blue)
 ![MPI](https://img.shields.io/badge/MPI-optional-informational)
 ![Python tools](https://img.shields.io/badge/tools-Python%203-yellow)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 **An evolutionary simulation of trees, where form is never designed, only survived.**
 
@@ -315,3 +316,7 @@ Most tunable numbers live in `include/simulation/simulation_constants.hpp` and c
 | `cluster/` | Cluster build script and Slurm jobs |
 | `tests/simulation_tests.cpp` | Simulation tests |
 | `external/glad` | OpenGL loader |
+
+## License
+
+MIT. See [LICENSE](LICENSE).
