@@ -1,6 +1,54 @@
 # TreeSim
 
-An evolutionary simulation of trees. Each tree is a set of limbs that photosynthesize, respire, grow, branch, break under their own weight, and scatter mutated seeds. Trees compete for sunlight and soil, and a small per-limb neural network encoded in the genome decides how each limb grows. Nothing tells a tree what shape to take; form emerges from what survives and reproduces.
+[![CI](https://github.com/caleblin125/TreeSimulation/actions/workflows/ci.yml/badge.svg)](https://github.com/caleblin125/TreeSimulation/actions/workflows/ci.yml)
+![C++20](https://img.shields.io/badge/C%2B%2B-20-blue)
+![MPI](https://img.shields.io/badge/MPI-optional-informational)
+![Python tools](https://img.shields.io/badge/tools-Python%203-yellow)
+
+**An evolutionary simulation of trees, where form is never designed, only survived.**
+
+Each tree is a set of limbs that photosynthesize, respire, grow, branch, break under their own weight, and scatter mutated seeds. Trees compete for sunlight and soil on rolling terrain, and a small per-limb neural network in the genome decides how each limb grows. Nothing tells a tree what shape to take; shapes emerge from what survives and reproduces.
+
+![A stand on the hills after 236 years, coloured by genome: relatives share a shade](docs/images/forest.jpg)
+
+## Highlights
+
+- **Mechanistic trees.** Limbs are elliptic cylinders with real wood density, bending strength, sapwood, xylem and embolism. They carry their load, sway in storms and snap when overstressed. Light is ray-cast along the sun's daily track, and soil is a depletable resource shared through spreading roots and fine roots.
+- **Evolution without a fitness function.** Genes and growth-brain weights mutate at every seed. Selection is only who lives long enough to set seed, so lineages, species and forms come and go on their own.
+- **Big forests.** A 120 m hillside holds 50,000+ trees and millions of limbs across MPI ranks. Long runs chain through checkpoints on a Slurm cluster, and limbs spill to local disk when memory runs low.
+- **See what evolved.** Record a run, then explore it in 3D in the browser, render frames and videos, follow the fittest trees growing, and trace lineages, species and genes through time.
+
+## Gallery
+
+| The fittest trees growing (largest lineages, year 235) | Their final forms |
+|---|---|
+| ![The six fittest trees growing side by side](docs/images/fittest_growth.gif) | ![The fittest trees at year 235](docs/images/fittest_trees.jpg) |
+
+| Self-avoidance: without (top) and with (bottom) | Inferred phylogeny of a crowded forest |
+|---|---|
+| ![Tallest trees without and with self-avoidance](docs/images/self_avoidance.jpg) | ![Phylogenomic tree](docs/images/phylogeny.jpg) |
+
+![Species evolving over 157 years: counts, genetic distance, form and genes](docs/images/species_evolution.jpg)
+
+## Quick start
+
+```
+sudo apt install build-essential cmake libglfw3-dev libglm-dev libgl1-mesa-dev
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+./build/TreeSim                                        # watch a forest grow
+./build/TreeSim --headless 150 --output runs/demo      # or record 150 years without a window
+pip install numpy matplotlib scipy
+python tools/render_app.py --root runs                 # explore it at http://localhost:8765/explore
+```
+
+| Where | What |
+|---|---|
+| `src/simulation`, `include/simulation` | the model: limbs, organisms, light, soil, physics, MPI decomposition, recording |
+| `src/renderer` | the live OpenGL viewer |
+| `tools/` | rendering, the browser explorer, genomes, phylogeny, species, stand statistics |
+| `params/` | parameter files (JSON) for bigger or different worlds |
+| `cluster/` | Slurm scripts: builds, chained long runs, snapshots, sweeps |
+| `docs/` | notes on realism and design |
 
 ## Build
 
@@ -144,7 +192,8 @@ There are three ways to look at a recorded run:
 - **Species evolution**: `python tools/species_evolution.py runs/seed7` groups the trees of the latest genome file (or `--year`) into species in the same genetic space, then places every tree of every earlier genome file in that space. Each tree goes to its nearest species, or counts as founder-like while it is still closer to the founders' genome. `render/species_evolution.png` charts each species over time: its tree count, its genetic distance from the founders, its form (height, limbs, flat-leaf share, light-catching area, from the nearest frame) and some of its genes. `render/species_forms.png` draws each species' tallest member at several times. Species are Ward groups by default, which split even one interbreeding population into compact forms; `--method average` uses the main clades of the UPGMA tree instead, lettered as in `phylogeny.py`.
 - **Genetic colours**: where a run recorded genomes, each tree's colour shifts slightly with its genome, so relatives look alike. `python tools/genetic_colors.py runs/seed7` places every recorded tree in the genetic space of `phylogeny.py` and keeps its three main directions of variation as a tint, cached in `render/genetic_tints.npz` (render_run.py builds it on first use). Trees that lived and died between two genome files keep the plain colours.
 - **The fittest trees growing**: `python tools/tree_growth.py runs/seed7` follows the fittest trees from their first frame to the last, one video each (`render/fittest/tree_<id>.mp4`), plus all of them side by side by year (`fittest_grid.mp4`) and their final forms (`fittest_final.png`). Runs record no offspring counts, so fitness is the size of a tree's founder lineage at the last frame, and the largest living tree of each of the `--count` largest lineages is followed. `--by biomass|height|age` ranks single trees instead, and `--ids` picks trees. Each tree is drawn at its final scale and turns slowly about its trunk (`--orbit`).
-- **Interactive viewer**: `python tools/render_app.py` serves a viewer at http://localhost:8765 (from elsewhere, `ssh -L 8765:localhost:8765 <host>` first). Pick a run, scrub or play its frames, and switch between side, top, corner and single-tree views, colour modes, the genetic tint and the camera. Zoom to a region or to a tree from the list of the frame's tallest, heaviest, oldest or most-descended trees. Large forests stay quick because beyond the limb budget only the tallest trees are drawn. **render video** exports the whole run with the current settings through `render_run.py` (or `tree_growth.py` for one tree), as a Slurm job where `sbatch` exists (`--local-exports` runs it in place). `--root` sets where it looks for runs (default `/haydean/caleb/treesim`).
+- **3D explorer**: `python tools/render_app.py` also serves http://localhost:8765/explore, a browser version of the live viewer for recorded runs. Fly through a frame (W A S D, Q/E, drag to look) or orbit a tree, click a tree for its figures and genes, switch colour modes (including soil and genetic), show roots, and step or play through the frames. Every limb is drawn as an elliptic cylinder with WebGL (three.js from a CDN, so the browser needs internet access). Large plots load a region first, within a limb budget.
+- **Interactive renderer**: `python tools/render_app.py` serves a renderer at http://localhost:8765 (from elsewhere, `ssh -L 8765:localhost:8765 <host>` first). Pick a run, scrub or play its frames, and switch between side, top, corner and single-tree views, colour modes, the genetic tint and the camera. Zoom to a region or to a tree from the list of the frame's tallest, heaviest, oldest or most-descended trees. Large forests stay quick because beyond the limb budget only the tallest trees are drawn. **render video** exports the whole run with the current settings through `render_run.py` (or `tree_growth.py` for one tree), as a Slurm job where `sbatch` exists (`--local-exports` runs it in place). `--root` sets where it looks for runs (default `/haydean/caleb/treesim`).
 - **Compare runs**: `python tools/compare_runs.py <sweep dir or run dirs>` overlays the metrics of several runs (mean, 10–90% band and every run) in `compare.png` and writes each run's final values to `summary.csv`.
 
 ## Running on the cluster

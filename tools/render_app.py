@@ -5,8 +5,15 @@
     python tools/render_app.py --root runs --port 8765
 
 Then open http://localhost:8765 (from another machine: ssh -L 8765:localhost:8765
-<this host>, then the same address). It renders on request, with the same
-views and colours as render_run.py:
+<this host>, then the same address). Two interfaces share the server:
+
+/explore, the 3D explorer (tools/explorer.html): like the simulation's own
+window, fly through a recorded frame (WASD, Q/E, drag to look) or orbit a
+tree, click a tree for its figures and genes, switch colour modes, and step
+or play through the frames; the browser draws every limb with WebGL.
+
+/, the renderer: images on request, with the same views and colours as
+render_run.py:
 
 - pick a run and scrub or play through its frames;
 - side, top or corner view, or one tree on its own (turn it with the orbit slider);
@@ -360,6 +367,121 @@ def public(job):
     return {key: value for key, value in job.items() if key != "process"} | {"status": status, "tail": tail, "videos": videos}
 
 
+PLANT_FIELDS = ("energy", "max_height", "age", "biomass", "root_biomass", "leaf_area", "leaf_share", "growth", "reproduction")
+_genome_cache = {}
+
+
+def geometry(runs, query):
+    """The drawn trees of one frame for the 3D explorer, as bytes: a uint32
+    JSON length, the JSON (trees, soil, counts; padded to 4 bytes), then 15
+    float32 per limb (root xyz, quaternion wxyz, length, width, thickness,
+    rgb, underground flag, tree index into the JSON's trees). Shoots come
+    first and roots after, so the client can hide roots by drawing fewer."""
+    run = text(query, "run", "")
+    info = runs.info(run)
+    index = int(number(query, "frame", info["count"] - 1))
+    frame = runs.frame(run, index)
+    settings = info["settings"]
+    color = text(query, "color", "default", rr.COLOR_MODES + ("soil",))
+    tint = number(query, "tint", 0.15, 0.0, 1.0)
+    max_limbs = int(number(query, "maxlimbs", 400000, 1000, 20_000_000))
+    zoom = number(query, "w", 0.0, 0.0)
+    region = None
+    if zoom > 0:
+        cx, cz = number(query, "cx", 0.0), number(query, "cz", 0.0)
+        region = (cx - zoom / 2, cx + zoom / 2, cz - zoom / 2, cz + zoom / 2)
+    keep, limb_index = select(frame, region, max_limbs)
+    plants, limbs = frame["plants"][keep], frame["limbs"][limb_index]
+    all_plants = frame["plants"]
+    energy_scale = max(1e-6, float(np.percentile(all_plants["energy"], 95))) if len(all_plants) else 1.0
+    age_scale = max(1e-6, float(all_plants["age"].max())) if len(all_plants) else 1.0
+    colors, below = rr.limb_colors("default" if color == "soil" else color, plants, limbs, energy_scale, age_scale,
+                                   settings["leaf_aspect"], Path(info["run"]) if info["genomes"] else None, tint)
+    owner = np.repeat(np.arange(len(plants)), plants["limb_count"].astype(np.int64))
+    order = np.concatenate([np.flatnonzero(~below), np.flatnonzero(below)])
+    data = np.zeros((len(order), 15), np.float32)
+    data[:, 0:3] = limbs["root"][order]
+    data[:, 3:7] = limbs["quat"][order]
+    data[:, 7] = limbs["length"][order]
+    data[:, 8] = limbs["width"][order]
+    data[:, 9] = limbs["thickness"][order]
+    data[:, 10:13] = colors[order, :3]
+    data[:, 13] = below[order]
+    data[:, 14] = owner[order]
+    base = frame["base"][keep]
+    trees = [{"id": int(p["id"]), "lineage": int(p["lineage"]), "limbs": int(p["limb_count"]), "leaves": int(p["leaf_count"]),
+              "base": [round(float(v), 3) for v in base[i]], **{f: round(float(p[f]), 4) for f in PLANT_FIELDS}}
+             for i, p in enumerate(plants)]
+    soil = frame["soil"]
+    header = {"time": frame["time"], "frame": index, "count": info["count"], "trees": trees,
+              "shoots": int((~below).sum()), "limbs": int(len(order)),
+              "shown": f"{len(keep):,} of {int((frame['counts'] > 0).sum()):,} trees, {len(order):,} limbs",
+              "soilCell": settings["soil_cell"],
+              "soil": [[int(c["x"]), int(c["z"]), round(float(c["resource"]), 3)] for c in soil] if color == "soil" else []}
+    blob = json.dumps(header).encode()
+    blob += b" " * (-len(blob) % 4)
+    return np.uint32(len(blob)).tobytes() + blob + data.tobytes()
+
+
+def terrain(runs, query):
+    """The ground as a grid of heights (at most ~160 cells a side) and the plot."""
+    info = runs.info(text(query, "run", ""))
+    plot = info["settings"]["plot"]
+    ground = info["settings"]["terrain"]
+    if ground is None:
+        return {"plot": plot, "flat": True}
+    min_x, min_z, cell, heights = ground
+    step = max(1, int(np.ceil(max(heights.shape) / 160)))
+    sub = heights[::step, ::step]
+    return {"plot": plot, "flat": False, "minX": min_x, "minZ": min_z, "cell": cell * step,
+            "nx": int(sub.shape[1]), "nz": int(sub.shape[0]), "heights": np.round(sub, 3).ravel().tolist()}
+
+
+def metrics(runs, query):
+    """metrics.csv as columns, for the explorer's metrics panel."""
+    run = runs.allowed(text(query, "run", ""))
+    path = run / "metrics.csv"
+    if not path.exists():
+        return {}
+    data = np.genfromtxt(path, delimiter=",", names=True)
+    data = np.atleast_1d(data)
+    keep = ("time_years", "population", "propagules", "limbs", "avg_energy", "avg_height", "max_height", "avg_growth",
+            "avg_reproduction", "lineages", "effective_lineages")
+    return {name: np.round(data[name].astype(float), 4).tolist() for name in keep if name in data.dtype.names}
+
+
+def genome(runs, query):
+    """One tree's genes, from the latest genome file at or before the frame
+    that holds it (or the first after, for trees born since)."""
+    import genomes as gn
+
+    run = runs.allowed(text(query, "run", ""))
+    tree = int(number(query, "tree", -1))
+    year = number(query, "year", 1e9)
+    files = gn.list_genomes(str(run))
+    if not files:
+        return {"error": "this run recorded no genomes"}
+    stamps = []
+    for path in files:
+        key = ("time", path)
+        if key not in _genome_cache:
+            _genome_cache[key] = gn.read_genomes(path, values=False)
+        stamps.append(_genome_cache[key])
+    before = [i for i, d in enumerate(stamps) if d["time"] <= year + 1e-3]
+    order = list(reversed(before)) + [i for i in range(len(files)) if i not in before]
+    for i in order:
+        if tree in set(stamps[i]["ids"].tolist()):
+            key = ("full", files[i])
+            if key not in _genome_cache:
+                if len([k for k in _genome_cache if k[0] == "full"]) >= 2:
+                    _genome_cache.pop(next(k for k in _genome_cache if k[0] == "full"))
+                _genome_cache[key] = gn.read_genomes(files[i])
+            dump = _genome_cache[key]
+            row = int(np.flatnonzero(dump["ids"] == tree)[0])
+            return {"year": round(float(dump["time"]), 1), "genes": {name: float(values[row]) for name, values in dump["genes"].items()}}
+    return {"error": f"tree {tree} is in no genome file (it lived between two)"}
+
+
 class Handler(BaseHTTPRequestHandler):
     runs = None
 
@@ -400,6 +522,17 @@ class Handler(BaseHTTPRequestHandler):
                 self.send(200, image, "image/png", {"X-Note": note, "X-Seconds": f"{time.time() - started:.1f}"})
             elif url.path == "/api/export":
                 self.send(200, export(self.runs, query))
+            elif url.path == "/explore":
+                self.send(200, (TOOLS / "explorer.html").read_text(), "text/html; charset=utf-8")
+            elif url.path == "/api/geometry":
+                started = time.time()
+                self.send(200, geometry(self.runs, query), "application/octet-stream", {"X-Seconds": f"{time.time() - started:.1f}"})
+            elif url.path == "/api/terrain":
+                self.send(200, terrain(self.runs, query))
+            elif url.path == "/api/metrics":
+                self.send(200, metrics(self.runs, query))
+            elif url.path == "/api/genome":
+                self.send(200, genome(self.runs, query))
             elif url.path == "/api/jobs":
                 self.send(200, [public(job) for job in self.runs.jobs])
             else:
@@ -444,7 +577,7 @@ tr.pick { cursor:pointer; } tr.pick:hover { background:var(--line); }
 .hide { display:none; }
 @media (max-width: 800px) { main { grid-template-columns:1fr; } aside { max-height:none; border-right:0; border-bottom:1px solid var(--line); } }
 </style></head><body>
-<header><h1>TreeSim viewer</h1>
+<header><h1>TreeSim viewer</h1><a href="/explore" style="color:var(--accent)">3D explorer &rarr;</a>
 <select id="run" style="max-width:420px"></select>
 <span class="status" id="runInfo"></span></header>
 <main><aside>

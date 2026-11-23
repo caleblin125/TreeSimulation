@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    name: Build, test and render (viewer on)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libglfw3-dev libgl1-mesa-dev libglm-dev
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build -j "$(nproc)"
+      - name: Unit tests
+        run: ctest --test-dir build --output-on-failure
+      - name: Headless run
+        run: ./build/TreeSim --headless 5 --seed 1 --output run --frame-every 1 --genomes-every 5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Render the run
+        run: |
+          pip install numpy matplotlib scipy
+          python -m py_compile tools/*.py
+          python tools/render_run.py run --view both --no-video --jobs 2
+          python tools/stand_stats.py run
+          python tools/genomes.py run
+      - uses: actions/upload-artifact@v4
+        with:
+          name: render
+          path: run/render
+
+  mpi:
+    name: MPI build and two-rank run
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libopenmpi-dev openmpi-bin
+      - name: Build
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DTREESIM_BUILD_VIEWER=OFF -DTREESIM_USE_MPI=ON
+          cmake --build build -j "$(nproc)"
+      - name: Unit tests
+        run: ctest --test-dir build --output-on-failure
+      - name: Two ranks, with limbs spilling to disk
+        run: |
+          mpirun -n 2 --oversubscribe ./build/TreeSim --headless 5 --seed 1 --spill-dir "$RUNNER_TEMP" --spill-reserve-mb 1000000

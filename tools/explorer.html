@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TreeSim explorer</title>
+<style>
+:root { --panel: rgba(20, 26, 22, 0.82); --ink: #e6efe4; --muted: #9fb0a2; --line: rgba(255,255,255,0.12); --accent: #8fd16f; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #9fc3e0; font: 13px/1.4 system-ui, sans-serif; color: var(--ink); }
+canvas { display: block; }
+.panel { position: absolute; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; backdrop-filter: blur(6px); }
+#controls { top: 10px; left: 10px; width: 290px; max-height: calc(100vh - 20px); overflow: auto; }
+#tree { top: 10px; right: 10px; width: 300px; max-height: calc(100vh - 140px); overflow: auto; display: none; }
+#metrics { bottom: 10px; right: 10px; width: 300px; }
+#timeline { bottom: 10px; left: 310px; right: 320px; display: flex; gap: 8px; align-items: center; }
+#timeline input { flex: 1; }
+h1 { font-size: 15px; margin: 0 0 6px; }
+h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 10px 0 4px; }
+label { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 3px 0; }
+label input[type=range] { flex: 1; }
+.v { color: var(--muted); min-width: 38px; text-align: right; font-variant-numeric: tabular-nums; }
+select, input[type=number] { background: rgba(0,0,0,0.3); color: var(--ink); border: 1px solid var(--line); border-radius: 5px; padding: 3px 5px; }
+button { background: var(--accent); color: #102010; border: 0; border-radius: 5px; padding: 4px 9px; cursor: pointer; font-weight: 600; }
+button.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); font-weight: 400; }
+.row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.muted { color: var(--muted); }
+table { width: 100%; border-collapse: collapse; }
+td { padding: 1px 0; } td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+a { color: var(--accent); }
+#status { margin-top: 6px; color: var(--muted); }
+#status.error { color: #ff8a7a; }
+#help { color: var(--muted); font-size: 12px; }
+@media (max-width: 900px) { #timeline { left: 10px; right: 10px; bottom: 150px; } #metrics { display: none; } #controls { width: calc(100vw - 20px); max-height: 40vh; } #tree { top: auto; bottom: 200px; width: calc(100vw - 20px); max-height: 30vh; } }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+</head>
+<body>
+<div id="controls" class="panel">
+  <h1>TreeSim explorer</h1>
+  <div class="row"><select id="run" style="width:100%"></select></div>
+  <h2>Colour</h2>
+  <div class="row"><select id="color">
+    <option value="default">default</option><option value="genetic">genetic</option><option value="lineage">lineage</option>
+    <option value="soil">soil</option><option value="energy">energy</option><option value="strain">strain</option><option value="age">age</option>
+  </select></div>
+  <label>genetic tint <input type="range" id="tint" min="0" max="1" step="0.05" value="0.15"><span class="v" id="tintV"></span></label>
+  <label>limb width &times; <input type="range" id="width" min="1" max="8" step="0.5" value="1"><span class="v" id="widthV"></span></label>
+  <label>show roots <input type="checkbox" id="roots"></label>
+  <h2>Camera</h2>
+  <div class="row"><select id="mode"><option value="fly">fly (WASD, Q/E, drag)</option><option value="orbit">orbit (drag, wheel)</option></select>
+  <button class="ghost" id="home">reset</button></div>
+  <label>fly speed <input type="range" id="speed" min="0.5" max="40" step="0.5" value="6"><span class="v" id="speedV"></span></label>
+  <h2>What to load</h2>
+  <label>region width (m, 0 = all) <input type="number" id="w" min="0" step="1" value="0" style="width:64px"></label>
+  <label>centre x, z <span><input type="number" id="cx" step="1" value="0" style="width:56px"> <input type="number" id="cz" step="1" value="0" style="width:56px"></span></label>
+  <label>limb budget <select id="maxlimbs"><option>100000</option><option selected>400000</option><option>1000000</option><option>2500000</option></select></label>
+  <div class="row"><button id="load">load</button><a href="/" class="muted">2D renderer</a></div>
+  <div id="status">loading…</div>
+  <h2>Keys</h2>
+  <div id="help">W A S D move, Q E down and up, Shift faster, drag to look (fly) or turn (orbit). Click a tree to select it, Esc to clear. , and . step frames, space plays.</div>
+</div>
+
+<div id="tree" class="panel">
+  <div class="row" style="justify-content:space-between"><h1 id="treeTitle">tree</h1><button class="ghost" id="close">&times;</button></div>
+  <table id="treeStats"></table>
+  <div class="row" style="margin-top:6px">
+    <button class="ghost" id="orbitTree">orbit it</button>
+    <button class="ghost" id="zoomTree">load around it</button>
+    <button class="ghost" id="videoTree">growth video</button>
+  </div>
+  <div id="videoStatus" class="muted"></div>
+  <h2>Genes</h2>
+  <table id="genes"><tr><td class="muted">…</td></tr></table>
+</div>
+
+<div id="metrics" class="panel"><h2 style="margin-top:0">Simulation metrics</h2><table id="metricsTable"></table></div>
+
+<div id="timeline" class="panel">
+  <button class="ghost" id="prev">&#9664;</button><button id="play">play</button><button class="ghost" id="next">&#9654;</button>
+  <input type="range" id="frame" min="0" max="0" value="0"><span id="year" class="muted"></span>
+</div>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+const $ = id => document.getElementById(id);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x9fc3e0);
+scene.fog = new THREE.Fog(0x9fc3e0, 150, 600);
+const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.02, 2000);
+scene.add(new THREE.HemisphereLight(0xdfefff, 0x5a4a32, 1.1));
+const sun = new THREE.DirectionalLight(0xfff4e0, 1.6);
+sun.position.set(-0.5, 1.0, 0.35);
+scene.add(sun);
+const orbit = new OrbitControls(camera, renderer.domElement);
+orbit.enabled = false;
+orbit.enableDamping = true;
+
+// Limbs: one elliptic cylinder per limb, base at the origin, along +y,
+// scaled to (width, length, thickness) and turned by the limb's quaternion.
+const limbGeometry = new THREE.CylinderGeometry(0.5, 0.5, 1, 7, 1, false);
+limbGeometry.translate(0, 0.5, 0);
+const limbMaterial = new THREE.MeshLambertMaterial();
+let limbMesh = null, data = null, header = null, ends = null, baseColors = null;
+let ground = null, terrainInfo = null, runInfo = null, metricsData = null;
+let selected = -1, playing = false, loading = false;
+
+// ---------- loading ----------
+function query(extra = {}) {
+  return new URLSearchParams({ run: $("run").value, frame: $("frame").value, color: $("color").value, tint: $("tint").value,
+    w: $("w").value, cx: $("cx").value, cz: $("cz").value, maxlimbs: $("maxlimbs").value, ...extra });
+}
+function status(text, error = false) { $("status").textContent = text; $("status").classList.toggle("error", error); }
+
+async function loadRuns() {
+  const runs = await (await fetch("/api/runs")).json();
+  $("run").innerHTML = runs.map(r => `<option value="${r.path}">${r.name} (${r.frames} frames)</option>`).join("");
+  let saved = null; try { saved = localStorage.getItem("treesim-explore-run"); } catch (e) {}
+  if (saved && runs.some(r => r.path === saved)) $("run").value = saved;
+  await loadRun();
+}
+
+async function loadRun() {
+  try { localStorage.setItem("treesim-explore-run", $("run").value); } catch (e) {}
+  const r = await fetch("/api/run?" + new URLSearchParams({ run: $("run").value }));
+  runInfo = await r.json();
+  if (!r.ok) { status(runInfo.error, true); return; }
+  $("frame").max = runInfo.count - 1; $("frame").value = runInfo.count - 1;
+  const mid = (runInfo.plot[0] + runInfo.plot[1]) / 2;
+  $("cx").value = mid.toFixed(0); $("cz").value = mid.toFixed(0);
+  // Big plots load a region first; the whole plot is a click away.
+  $("w").value = runInfo.plot[1] - runInfo.plot[0] > 40 ? 30 : 0;
+  terrainInfo = await (await fetch("/api/terrain?" + new URLSearchParams({ run: $("run").value }))).json();
+  metricsData = await (await fetch("/api/metrics?" + new URLSearchParams({ run: $("run").value }))).json();
+  buildGround();
+  await loadFrame(true);
+}
+
+function heightAt(x, z) {
+  const t = terrainInfo;
+  if (!t || t.flat) return 0;
+  const gx = Math.min(Math.max((x - t.minX) / t.cell, 0), t.nx - 1), gz = Math.min(Math.max((z - t.minZ) / t.cell, 0), t.nz - 1);
+  const x0 = Math.min(Math.floor(gx), t.nx - 2), z0 = Math.min(Math.floor(gz), t.nz - 2), fx = gx - x0, fz = gz - z0;
+  const h = (i, j) => t.heights[j * t.nx + i];
+  const a = h(x0, z0) + (h(x0 + 1, z0) - h(x0, z0)) * fx, b = h(x0, z0 + 1) + (h(x0 + 1, z0 + 1) - h(x0, z0 + 1)) * fx;
+  return a + (b - a) * fz;
+}
+
+function buildGround() {
+  if (ground) { scene.remove(ground); ground.geometry.dispose(); }
+  const [lo, hi] = runInfo.plot, span = hi - lo, n = Math.min(160, Math.max(2, Math.round(span / 1.0)));
+  const geometry = new THREE.PlaneGeometry(span, span, n, n);
+  geometry.rotateX(-Math.PI / 2);
+  geometry.translate((lo + hi) / 2, 0, (lo + hi) / 2);
+  const pos = geometry.attributes.position;
+  for (let i = 0; i < pos.count; i++) pos.setY(i, heightAt(pos.getX(i), pos.getZ(i)));
+  geometry.computeVertexNormals();
+  geometry.setAttribute("color", new THREE.BufferAttribute(new Float32Array(pos.count * 3).fill(0.5), 3));
+  ground = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  scene.add(ground);
+  colourGround([]);
+}
+
+function colourGround(soil, cell = 2) {
+  const pos = ground.geometry.attributes.position, col = ground.geometry.attributes.color;
+  const lookup = new Map(soil.map(([x, z, r]) => [x + "," + z, r]));
+  for (let i = 0; i < pos.count; i++) {
+    let r = 0.55, g = 0.6, b = 0.38;
+    if (soil.length) {
+      const v = lookup.get(Math.floor(pos.getX(i) / cell) + "," + Math.floor(pos.getZ(i) / cell));
+      const t = v === undefined ? 0.6 : Math.min(Math.max(v, 0), 1);
+      r = 0.75 - 0.55 * t; g = 0.62 + 0.2 * t; b = 0.35 - 0.15 * t;
+    }
+    col.setXYZ(i, r, g, b);
+  }
+  col.needsUpdate = true;
+}
+
+async function loadFrame(resetCamera = false) {
+  if (loading) return;
+  loading = true;
+  status("loading frame…");
+  const started = performance.now();
+  try {
+    const r = await fetch("/api/geometry?" + query());
+    if (!r.ok) throw new Error((await r.json()).error);
+    const buffer = await r.arrayBuffer();
+    const jsonLength = new Uint32Array(buffer, 0, 1)[0];
+    header = JSON.parse(new TextDecoder().decode(new Uint8Array(buffer, 4, jsonLength)));
+    data = new Float32Array(buffer, 4 + jsonLength);
+    buildLimbs();
+    colourGround(header.soil, header.soilCell);
+    updateTimeline();
+    if (resetCamera) home();
+    if (selected >= 0) { const id = selectedId; selected = -1; selectById(id); }
+    status(`${header.shown} · ${((performance.now() - started) / 1000).toFixed(1)} s`);
+  } catch (e) { status(e.message, true); playing = false; $("play").textContent = "play"; }
+  loading = false;
+}
+
+function buildLimbs() {
+  if (limbMesh) { scene.remove(limbMesh); limbMesh.dispose(); }
+  const n = header.limbs;
+  limbMesh = new THREE.InstancedMesh(limbGeometry, limbMaterial, Math.max(1, n));
+  ends = new Float32Array(n * 3);
+  baseColors = new Float32Array(n * 3);
+  const color = new THREE.Color();
+  const q = new THREE.Quaternion(), up = new THREE.Vector3();
+  for (let i = 0; i < n; i++) {
+    const o = i * 15;
+    q.set(data[o + 4], data[o + 5], data[o + 6], data[o + 3]);
+    up.set(0, data[o + 7], 0).applyQuaternion(q);
+    ends[i * 3] = data[o] + up.x; ends[i * 3 + 1] = data[o + 1] + up.y; ends[i * 3 + 2] = data[o + 2] + up.z;
+    baseColors.set([data[o + 10], data[o + 11], data[o + 12]], i * 3);
+    color.setRGB(data[o + 10], data[o + 11], data[o + 12], THREE.SRGBColorSpace);
+    limbMesh.setColorAt(i, color);
+  }
+  setMatrices();
+  limbMesh.count = $("roots").checked ? n : header.shoots;
+  scene.add(limbMesh);
+}
+
+function setMatrices() {
+  if (!limbMesh) return;
+  const scale = +$("width").value, m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), s = new THREE.Vector3();
+  for (let i = 0; i < header.limbs; i++) {
+    const o = i * 15;
+    p.set(data[o], data[o + 1], data[o + 2]);
+    q.set(data[o + 4], data[o + 5], data[o + 6], data[o + 3]);
+    s.set(Math.max(data[o + 8], 1e-4) * scale, Math.max(data[o + 7], 1e-4), Math.max(data[o + 9], 1e-4) * scale);
+    limbMesh.setMatrixAt(i, m.compose(p, q, s));
+  }
+  limbMesh.instanceMatrix.needsUpdate = true;
+  limbMesh.computeBoundingSphere();
+}
+
+// ---------- camera ----------
+const fly = { yaw: 0, pitch: -0.35, keys: new Set() };
+function home() {
+  const [lo, hi] = header && +$("w").value > 0 ? [+$("cx").value - $("w").value / 2, +$("cx").value + +$("w").value / 2] : runInfo.plot;
+  const cz = +$("w").value > 0 ? +$("cz").value : (runInfo.plot[0] + runInfo.plot[1]) / 2;
+  const span = hi - lo, cx = (lo + hi) / 2, groundY = heightAt(cx, cz);
+  const top = header && header.trees.length ? Math.max(...header.trees.map(t => t.base[1] + t.max_height)) : groundY + 5;
+  camera.position.set(lo - 0.15 * span, Math.max(top, groundY) + 0.35 * span, cz + 0.65 * span);
+  const target = new THREE.Vector3(cx, groundY + 0.25 * (top - groundY), cz);
+  camera.lookAt(target);
+  orbit.target.copy(target);
+  const dir = target.clone().sub(camera.position).normalize();
+  fly.yaw = Math.atan2(dir.x, -dir.z); fly.pitch = Math.asin(dir.y);
+  $("speed").value = Math.max(1, Math.round(span / 6)); showValues();
+}
+function applyFly(dt) {
+  const dir = new THREE.Vector3(Math.sin(fly.yaw) * Math.cos(fly.pitch), Math.sin(fly.pitch), -Math.cos(fly.yaw) * Math.cos(fly.pitch));
+  const right = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0)).normalize();
+  const speed = +$("speed").value * (fly.keys.has("shift") ? 4 : 1) * dt, move = new THREE.Vector3();
+  if (fly.keys.has("w")) move.add(dir); if (fly.keys.has("s")) move.sub(dir);
+  if (fly.keys.has("d")) move.add(right); if (fly.keys.has("a")) move.sub(right);
+  if (fly.keys.has("e")) move.y += 1; if (fly.keys.has("q")) move.y -= 1;
+  if (move.lengthSq()) camera.position.addScaledVector(move.normalize(), speed);
+  camera.lookAt(camera.position.clone().add(dir));
+}
+let drag = null;
+renderer.domElement.addEventListener("pointerdown", e => { drag = { x: e.clientX, y: e.clientY, moved: false }; });
+addEventListener("pointermove", e => {
+  if (!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+  if ($("mode").value === "fly" && drag.moved) {
+    fly.yaw += dx * 0.004; fly.pitch = Math.max(-1.5, Math.min(1.5, fly.pitch - dy * 0.004));
+    drag.x = e.clientX; drag.y = e.clientY;
+  }
+});
+addEventListener("pointerup", e => { if (drag && !drag.moved && e.target === renderer.domElement) pick(e); drag = null; });
+addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT" && e.target.type !== "range" && e.target.type !== "checkbox") return;
+  if (e.target.tagName === "SELECT") return;
+  const k = e.key.toLowerCase();
+  if ("wasdqe".includes(k) && k.length === 1) fly.keys.add(k);
+  if (e.key === "Shift") fly.keys.add("shift");
+  if (e.key === "Escape") deselect();
+  if (e.key === ",") step(-1); if (e.key === ".") step(1);
+  if (e.key === " ") { e.preventDefault(); togglePlay(); }
+});
+addEventListener("keyup", e => { fly.keys.delete(e.key.toLowerCase()); if (e.key === "Shift") fly.keys.delete("shift"); });
+$("mode").addEventListener("change", () => {
+  orbit.enabled = $("mode").value === "orbit";
+  if (!orbit.enabled) { const dir = orbit.target.clone().sub(camera.position).normalize(); fly.yaw = Math.atan2(dir.x, -dir.z); fly.pitch = Math.asin(dir.y); }
+});
+
+// ---------- picking ----------
+// Nearest limb whose axis passes within its half-width (or a few pixels) of the ray.
+function pick(e) {
+  if (!header || !header.limbs) return;
+  const ndc = new THREE.Vector2((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  const ray = new THREE.Raycaster(); ray.setFromCamera(ndc, camera);
+  const o = ray.ray.origin, d = ray.ray.direction, count = limbMesh.count, scale = +$("width").value;
+  const pixel = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / innerHeight * 4;
+  let best = -1, bestT = Infinity;
+  for (let i = 0; i < count; i++) {
+    const p = i * 15, ax = data[p], ay = data[p + 1], az = data[p + 2];
+    const ux = ends[i * 3] - ax, uy = ends[i * 3 + 1] - ay, uz = ends[i * 3 + 2] - az;
+    const wx = o.x - ax, wy = o.y - ay, wz = o.z - az;
+    const a = ux * ux + uy * uy + uz * uz, b = ux * d.x + uy * d.y + uz * d.z, c = 1;
+    const dd = ux * wx + uy * wy + uz * wz, ee = d.x * wx + d.y * wy + d.z * wz, den = a * c - b * b;
+    let s = den > 1e-12 ? (b * ee - c * dd) / den : 0; s = Math.max(0, Math.min(1, s));
+    const t = b * s - ee;
+    if (t <= 0 || t >= bestT) continue;
+    const px = ax + ux * s - (o.x + d.x * t), py = ay + uy * s - (o.y + d.y * t), pz = az + uz * s - (o.z + d.z * t);
+    const reach = Math.max(0.5 * Math.max(data[p + 8], data[p + 9]) * scale, pixel * t);
+    if (px * px + py * py + pz * pz <= reach * reach) { best = i; bestT = t; }
+  }
+  if (best < 0) { deselect(); return; }
+  select(data[best * 15 + 14]);
+}
+let selectedId = null;
+function select(index) {
+  deselect(false);
+  selected = index; selectedId = header.trees[index].id;
+  const highlight = new THREE.Color(1.0, 0.86, 0.25), c = new THREE.Color();
+  for (let i = 0; i < header.limbs; i++) {
+    if (data[i * 15 + 14] !== index) continue;
+    c.setRGB(baseColors[i * 3], baseColors[i * 3 + 1], baseColors[i * 3 + 2], THREE.SRGBColorSpace).lerp(highlight, 0.65);
+    limbMesh.setColorAt(i, c);
+  }
+  limbMesh.instanceColor.needsUpdate = true;
+  showTree();
+}
+function selectById(id) { const i = header.trees.findIndex(t => t.id === id); if (i >= 0) select(i); else { $("tree").style.display = "none"; status(`tree ${id} is not in this frame`); } }
+function deselect(hide = true) {
+  if (selected >= 0 && limbMesh) {
+    const c = new THREE.Color();
+    for (let i = 0; i < header.limbs; i++) if (data[i * 15 + 14] === selected) { c.setRGB(baseColors[i * 3], baseColors[i * 3 + 1], baseColors[i * 3 + 2], THREE.SRGBColorSpace); limbMesh.setColorAt(i, c); }
+    limbMesh.instanceColor.needsUpdate = true;
+  }
+  selected = -1;
+  if (hide) { selectedId = null; $("tree").style.display = "none"; }
+}
+const fmt = (v, d = 2) => (Math.abs(v) >= 1e4 ? v.toExponential(2) : (+v).toFixed(d));
+async function showTree() {
+  const t = header.trees[selected];
+  $("tree").style.display = "block";
+  $("treeTitle").textContent = `tree ${t.id}`;
+  const rows = [["lineage", t.lineage], ["age", fmt(t.age, 1) + " years"], ["height", fmt(t.max_height) + " m"], ["limbs", t.limbs.toLocaleString()],
+    ["flat leaves", t.leaves], ["biomass", fmt(t.biomass, 1) + " kg"], ["root share", fmt(t.root_biomass / Math.max(t.biomass, 1e-9), 2)],
+    ["light-catching area", fmt(t.leaf_area, 3) + " m²"], ["flat-leaf share of it", fmt(t.leaf_share, 2)], ["energy", fmt(t.energy, 0) + " J"],
+    ["growth", fmt(t.growth, 4) + " m"], ["reproduction", fmt(t.reproduction, 2)], ["base", t.base.map(v => v.toFixed(1)).join(", ")]];
+  $("treeStats").innerHTML = rows.map(([k, v]) => `<tr><td class="muted">${k}</td><td>${v}</td></tr>`).join("");
+  $("genes").innerHTML = `<tr><td class="muted">loading…</td></tr>`;
+  const g = await (await fetch("/api/genome?" + new URLSearchParams({ run: $("run").value, tree: t.id, year: header.time }))).json();
+  if (selectedId !== t.id) return;
+  $("genes").innerHTML = g.error ? `<tr><td class="muted">${g.error}</td></tr>` :
+    `<tr><td class="muted" colspan="2">from the genome file of year ${g.year}</td></tr>` +
+    Object.entries(g.genes).map(([k, v]) => `<tr><td class="muted">${k}</td><td>${fmt(v, 4)}</td></tr>`).join("");
+}
+$("close").addEventListener("click", () => deselect());
+$("orbitTree").addEventListener("click", () => {
+  const t = header.trees[selected]; if (!t) return;
+  $("mode").value = "orbit"; orbit.enabled = true;
+  orbit.target.set(t.base[0], t.base[1] + 0.45 * t.max_height, t.base[2]);
+  const r = Math.max(2, 1.6 * t.max_height);
+  camera.position.set(t.base[0] + r * 0.8, t.base[1] + 0.7 * t.max_height + 0.3 * r, t.base[2] + r * 0.8);
+});
+$("zoomTree").addEventListener("click", () => {
+  const t = header.trees[selected]; if (!t) return;
+  $("cx").value = t.base[0].toFixed(1); $("cz").value = t.base[2].toFixed(1); $("w").value = 15; loadFrame(true);
+});
+$("videoTree").addEventListener("click", async () => {
+  const t = header.trees[selected]; if (!t) return;
+  const r = await fetch("/api/export?" + new URLSearchParams({ run: $("run").value, view: "tree", tree: t.id, tint: $("tint").value }));
+  const job = await r.json();
+  $("videoStatus").textContent = r.ok ? `started ${job.slurm ? "Slurm job " + job.slurm : "pid " + job.pid}; video in ${job.out}` : job.error;
+});
+
+// ---------- timeline and metrics ----------
+function updateTimeline() {
+  $("year").textContent = `year ${header.time.toFixed(1)} (${header.frame + 1}/${header.count})`;
+  const m = metricsData;
+  if (!m || !m.time_years) { $("metricsTable").innerHTML = ""; return; }
+  let k = 0; while (k + 1 < m.time_years.length && m.time_years[k + 1] <= header.time + 1e-3) k++;
+  const rows = [["year", m.time_years[k].toFixed(1)], ["trees", m.population[k].toLocaleString()], ["seeds in the soil", (m.propagules[k] || 0).toLocaleString()],
+    ["limbs", (m.limbs[k] || 0).toLocaleString()], ["mean / tallest height", `${fmt(m.avg_height[k])} / ${fmt(m.max_height[k])} m`],
+    ["lineages (effective)", `${m.lineages[k]} (${fmt(m.effective_lineages[k], 1)})`], ["mean growth", fmt(m.avg_growth[k], 4) + " m"]];
+  $("metricsTable").innerHTML = rows.map(([a, b]) => `<tr><td class="muted">${a}</td><td>${b}</td></tr>`).join("");
+}
+async function step(by) {
+  const next = Math.min(Math.max(+$("frame").value + by, 0), runInfo.count - 1);
+  if (next === +$("frame").value) return false;
+  $("frame").value = next; await loadFrame(); return true;
+}
+async function togglePlay() {
+  playing = !playing; $("play").textContent = playing ? "pause" : "play";
+  if (playing && +$("frame").value >= runInfo.count - 1) { $("frame").value = 0; await loadFrame(); }
+  while (playing) { const started = performance.now(); if (!(await step(1))) break; await new Promise(r => setTimeout(r, Math.max(0, 300 - (performance.now() - started)))); }
+  playing = false; $("play").textContent = "play";
+}
+$("prev").addEventListener("click", () => step(-1));
+$("next").addEventListener("click", () => step(1));
+$("play").addEventListener("click", togglePlay);
+$("frame").addEventListener("change", () => loadFrame());
+$("frame").addEventListener("input", () => { $("year").textContent = `frame ${+$("frame").value + 1}/${runInfo.count}`; });
+
+// ---------- controls ----------
+function showValues() { for (const id of ["tint", "width", "speed"]) $(id + "V").textContent = $(id).value; }
+$("run").addEventListener("change", loadRun);
+$("color").addEventListener("change", () => loadFrame());
+$("tint").addEventListener("change", () => loadFrame());
+$("tint").addEventListener("input", showValues);
+$("width").addEventListener("input", () => { showValues(); setMatrices(); });
+$("speed").addEventListener("input", showValues);
+$("roots").addEventListener("change", () => { if (limbMesh) limbMesh.count = $("roots").checked ? header.limbs : header.shoots; });
+$("load").addEventListener("click", () => loadFrame(true));
+$("home").addEventListener("click", home);
+addEventListener("resize", () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+
+let last = performance.now();
+renderer.setAnimationLoop(() => {
+  const now = performance.now(), dt = Math.min(0.1, (now - last) / 1000); last = now;
+  if ($("mode").value === "fly") applyFly(dt); else orbit.update();
+  renderer.render(scene, camera);
+});
+showValues();
+loadRuns();
+</script>
+</body>
+</html>
